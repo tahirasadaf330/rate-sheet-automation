@@ -1,0 +1,32 @@
+{
+  "id": 389,
+  "name": "TERM-Quickcom-PREMIUM-PREFIX:001 CTH2600",
+  "c_dt": "2017-06-07 19:32:09+0000",
+  "lastedit_dt": "2025-08-14 07:38:34+0000",
+  "last_export_dt": "2025-08-04 12:07:54+0000",
+  "companies_id": 11,
+  "currencies_id": 26,
+  "code_decks_id": 19,
+  "notes": null,
+  "with_taxes": false,
+  "import_templates_id": 2374,
+  "export_templates_id": null,
+  "mail_import_template_id": 60,
+  "mail_auto_import": false,
+  "parent_rate_tables_id": null,
+  "credentials_id": 11,
+  "src_code_decks_id": null,
+  "agreements_id": 2,
+  "rates_generators_id": null,
+  "rates_generation_auto": false,
+  "remote_settings": {
+    "email_sender": "ratenotification@quickcomtel.com",
+    "email_subject": "^.*QUICKCOM FULL PREMIUM.*"
+  },
+  "services_id": 1,
+  "tag": "@",
+  "policy": "regular",
+  "owner_users_id": null,
+  "companies_name": "Hayo",
+  "currencies_name": "USD"
+}

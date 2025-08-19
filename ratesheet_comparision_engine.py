@@ -1,0 +1,224 @@
+import os
+from typing import Optional, List
+import pandas as pd
+import numpy as np
+
+# ===========================
+# CONFIGURATION
+# ===========================
+LEFT_FILE = r"test_files\Second_File_Updated_cleaned.xlsx" #current rate file
+RIGHT_FILE = r"test_files\First_File_Updated_cleaned.xlsx" #new rate file
+OUT_FILE = "comparison.xlsx"
+AS_OF_DATE = "2025-07-08"
+NOTICE_DAYS = 7
+RATE_TOL = 0.0
+SHEET_LEFT = None
+SHEET_RIGHT = None
+# ===========================
+
+COL_CODE = "Dst Code"
+COL_RATE = "Rate"
+COL_EDATE = "Effective Date"
+COL_BI = "Billing Increment"
+
+OUT_COLS = ["Code", "Old Rate", "New Rate", "Effective Date", "Status", "Change Type", "Notes"]
+
+def read_table(path: str, sheet: Optional[str] = None) -> pd.DataFrame:
+    ext = os.path.splitext(path)[1].lower()
+    if ext in [".xlsx", ".xls"]:
+        df = pd.read_excel(path)
+    elif ext in [".csv", ".txt"]:
+        df = pd.read_csv(path)
+    else:
+        raise ValueError(f"Unsupported file type: {ext}")
+    expected = [COL_CODE, COL_RATE, COL_EDATE, COL_BI]
+    missing = [c for c in expected if c not in df.columns]
+    if missing:
+        raise ValueError(f"Missing expected columns {missing} in {path}. Found: {list(df.columns)}")
+    df = df[expected].copy()
+
+    df[COL_CODE] = df[COL_CODE].apply(lambda x: '' if pd.isna(x) else str(x).strip())
+    df[COL_CODE] = df[COL_CODE].str.replace(r'\.0+$', '', regex=True)
+    
+    df["_rate_raw"] = df[COL_RATE]
+    df[COL_RATE] = pd.to_numeric(df[COL_RATE], errors="coerce")
+    df["_edate_raw"] = df[COL_EDATE]
+    df[COL_EDATE] = pd.to_datetime(df[COL_EDATE], errors="coerce", utc=True).dt.tz_convert(None)
+    df[COL_BI] = df[COL_BI].astype(str).str.strip()
+
+    df.dropna(how='all', inplace=True)
+
+    return df
+
+def keep_latest_per_code(df: pd.DataFrame) -> pd.DataFrame:
+    tmp = df.copy()
+    tmp["_edate_for_rank"] = tmp[COL_EDATE].fillna(pd.Timestamp.min)
+    idx = tmp.groupby(COL_CODE)["_edate_for_rank"].idxmax()
+    return df.loc[idx].copy()
+
+def validate_row(row: pd.Series) -> List[str]:
+    reasons = []
+    code = row.get(COL_CODE)
+    rate = row.get(COL_RATE)
+    edate = row.get(COL_EDATE)
+    bi = row.get(COL_BI)
+    if not (isinstance(code, str) and code.isdigit()):
+        reasons.append("invalid code")
+    if pd.isna(rate):
+        reasons.append("invalid rate format")
+    elif not np.isfinite(rate):
+        reasons.append("invalid rate format")
+    elif rate < 0:
+        reasons.append("negative rate")
+    if pd.isna(edate):
+        reasons.append("invalid effective date")
+    if not (isinstance(bi, str) and bi.count('/') == 1):
+        reasons.append("invalid billing increment")
+    else:
+        a, b = bi.split("/")
+        if not (a.isdigit() and b.isdigit()):
+            reasons.append("invalid billing increment")
+    return reasons
+
+def effective_note(new_date: Optional[pd.Timestamp], as_of: pd.Timestamp, notice_days: int) -> str:
+    if pd.isna(new_date):
+        return "invalid effective date"
+    if new_date < as_of:
+        return "immediate effective date"
+    if new_date >= as_of + pd.Timedelta(days=notice_days):
+        return "proper 7-day notice"
+    return "new without 7-day notice"
+
+def compare(left: pd.DataFrame, right: pd.DataFrame, as_of_date: Optional[str], notice_days: int, rate_tol: float) -> pd.DataFrame:
+    left_dedup = keep_latest_per_code(left)
+    right_dedup = keep_latest_per_code(right)
+
+    merged = left_dedup.merge(right_dedup, on=COL_CODE, how="outer", suffixes=("_old", "_new"), indicator=True)
+
+    left_only = merged["_merge"].eq("left_only")
+    right_only = merged["_merge"].eq("right_only")
+    both = merged["_merge"].eq("both")
+
+    as_of = pd.to_datetime(as_of_date, errors="coerce")
+    if pd.isna(as_of):
+        as_of = pd.Timestamp.utcnow().tz_localize(None)
+
+    rows = []
+    old_rate = merged[f"{COL_RATE}_old"].astype(float)
+    new_rate = merged[f"{COL_RATE}_new"].astype(float)
+    can_compare_rate = both & old_rate.notna() & new_rate.notna()
+    bi_changed = both & (merged[f"{COL_BI}_old"].astype(str).str.strip() != merged[f"{COL_BI}_new"].astype(str).str.strip())
+
+    print(f"▶ Starting compare: {len(merged)} merged rows")
+
+    for i, r in merged.iterrows():
+        code = r[COL_CODE]
+        o_rate = r.get(f"{COL_RATE}_old", np.nan)
+        n_rate = r.get(f"{COL_RATE}_new", np.nan)
+        n_date = r.get(f"{COL_EDATE}_new", pd.NaT)
+        notes: List[str] = []
+
+        print(f"\n--- Row {i} | Code={code} ---")
+        print(f" OldRate={o_rate}, NewRate={n_rate}, EffDate={n_date}, BI_old={r.get(f'{COL_BI}_old')}, BI_new={r.get(f'{COL_BI}_new')}")
+
+        if right_only[i]:
+            print(" → Detected as NEW")
+            change_type = "New"
+            eff_note = effective_note(n_date, as_of, notice_days)
+            status = "Accepted" if eff_note == "proper 7-day notice" else "Rejected"
+            notes.append(eff_note)
+            reasons = validate_row(pd.Series({COL_CODE: r[COL_CODE], COL_RATE: n_rate, COL_EDATE: n_date, COL_BI: r.get(f"{COL_BI}_new", "")}))
+            if reasons:
+                print(f"   Validation failed: {reasons}")
+                status = "Rejected"
+                notes.extend(reasons)
+            rows.append({"Code": code, "Old Rate": o_rate, "New Rate": n_rate, "Effective Date": n_date, "Status": status, "Change Type": change_type, "Notes": "; ".join(dict.fromkeys(notes))})
+            continue
+
+        if left_only[i]:
+            print(" → Detected as CLOSED")
+            rows.append({"Code": code, "Old Rate": o_rate, "New Rate": n_rate, "Effective Date": n_date, "Status": "Rejected", "Change Type": "Closed", "Notes": "present in current system but missing in new (closed)"})
+            continue
+
+        left_reasons = validate_row(pd.Series({COL_CODE: r[COL_CODE], COL_RATE: o_rate, COL_EDATE: r.get(f"{COL_EDATE}_old", pd.NaT), COL_BI: r.get(f"{COL_BI}_old", "")}))
+        right_reasons = validate_row(pd.Series({COL_CODE: r[COL_CODE], COL_RATE: n_rate, COL_EDATE: n_date, COL_BI: r.get(f"{COL_BI}_new", "")}))
+        invalid = bool(left_reasons or right_reasons)
+        if invalid:
+            print(f"   Validation issues: {left_reasons + right_reasons}")
+
+        if bi_changed[i]:
+            print(" → Billing Increment changed")
+            change_type = "Billing Increments Changes"
+            status = "Rejected"
+            notes.append("billing increment changed")
+            if can_compare_rate[i] and not np.isclose(n_rate, o_rate, atol=rate_tol):
+                notes.append("rate changed")
+        else:
+            if can_compare_rate[i]:
+                delta = n_rate - o_rate
+                print(f" → Rate delta={delta}")
+                eff_note = effective_note(n_date, as_of, notice_days)
+                if delta > rate_tol:
+                    if n_date < as_of:
+                        print("   Backdated Increase detected")
+                        change_type = "Backdated Increase"
+                        status = "Rejected"
+                        notes.append("immediate effective date")
+                    elif eff_note == "proper 7-day notice":
+                        print("   Proper Increase")
+                        change_type = "Increase"
+                        status = "Accepted"
+                        notes.append("proper 7-day notice")
+                    else:
+                        print("   Increase but invalid notice")
+                        change_type = "Increase"
+                        status = "Rejected"
+                        notes.append(eff_note)
+                elif delta < -rate_tol:
+                    if n_date < as_of:
+                        print("   Backdated Decrease")
+                        change_type = "Backdated Decrease"
+                        status = "Accepted"
+                        notes.append("backdated decrease")
+                    else:
+                        print("   Normal Decrease")
+                        change_type = "Decrease"
+                        status = "Accepted"
+                else:
+                    print("   Unchanged → skipping row")
+                    continue
+            else:
+                print(" → Cannot compare rates (invalid data)")
+                change_type = "Increase"
+                status = "Rejected"
+                notes.append("cannot determine change due to invalid data")
+
+        if invalid:
+            status = "Rejected"
+            notes.extend(left_reasons)
+            notes.extend(right_reasons)
+
+        rows.append({"Code": code, "Old Rate": o_rate, "New Rate": n_rate, "Effective Date": n_date, "Status": status, "Change Type": change_type, "Notes": "; ".join(dict.fromkeys(notes))})
+
+    out = pd.DataFrame(rows, columns=OUT_COLS)
+    if not out.empty:
+        out = out.sort_values(by=["Code", "Change Type"], kind="mergesort")
+    print(f"\n▶ Finished. Produced {len(out)} rows after comparison")
+    return out
+
+
+def write_excel(df: pd.DataFrame, path: str) -> None:
+    with pd.ExcelWriter(path, engine="xlsxwriter") as writer:
+        df.to_excel(writer, index=False, sheet_name="comparison")
+        ws = writer.sheets["comparison"]
+        ws.autofilter(0, 0, max(0, len(df)), max(0, df.shape[1]-1))
+        ws.freeze_panes(1, 0)
+
+if __name__ == "__main__":
+    left = read_table(LEFT_FILE, SHEET_LEFT)
+    right = read_table(RIGHT_FILE, SHEET_RIGHT)
+    result = compare(left, right, AS_OF_DATE, NOTICE_DAYS, RATE_TOL)
+    write_excel(result, OUT_FILE)
+    print(f"Wrote {OUT_FILE} with {len(result)} rows.")
+
+
