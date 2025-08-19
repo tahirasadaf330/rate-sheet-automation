@@ -85,7 +85,7 @@ def extract_company_keyword(query: str) -> str:
 # API helpers
 # -------------------------------------------------------------------
 
-def _post_json(api_url: str, payload: Dict, timeout: int = 30) -> Dict:
+def _post_json(api_url: str, payload: Dict, timeout: int = 500) -> Dict:
     resp = _session.post(api_url, headers=DEFAULT_HEADERS, json=payload, timeout=timeout)
     resp.raise_for_status()
     return resp.json()

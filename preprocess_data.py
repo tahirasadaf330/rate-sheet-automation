@@ -21,14 +21,14 @@ def detect_header_row(raw: pd.DataFrame) -> int:
     for idx, row in raw.iterrows():
         # 1) normalize each cell
         normed = [_norm(x) for x in row if pd.notna(x)]
-        print(normed)
+        # print(normed)
 
         if not normed:
             continue
         # 2) map normalized -> canonical using ALIAS_MAP (unknowns stay None)
         mapped = {ALIAS_MAP.get(n) for n in normed if ALIAS_MAP.get(n)}
 
-        print(mapped)
+        # print(mapped)
         
         # 3) if we covered all targets, we found the header row
         if targets.issubset({m for m in mapped if m}):
@@ -38,8 +38,6 @@ def detect_header_row(raw: pd.DataFrame) -> int:
         "Header not found. None of the rows contained all required columns "
         f"after normalization/aliasing. Required: {REQUIRED_COLS}"
     )
-
-
 
 
 def _norm(s: str) -> str:
@@ -60,6 +58,7 @@ ALIAS_MAP = {
     'area_code': 'Dst Code',
     'dial_code': 'Dst Code',
     'dialcode': 'Dst Code',
+    'codes': 'Dst Code',
 
     # Rate
     'rate': 'Rate',
@@ -71,6 +70,7 @@ ALIAS_MAP = {
     'pricing': 'Rate',
     'price': 'Rate',
     'pricing_in': 'Rate',
+    'rate/min($)': 'Rate',
 
     # Effective Date
     'effective_date': 'Effective Date',
@@ -80,6 +80,7 @@ ALIAS_MAP = {
     'start_date': 'Effective Date',
     'valid_from': 'Effective Date',
     'date': 'Effective Date',
+    'effectivedate': 'Effective Date',
 
     # Billing Increment
     'billing_increment': 'Billing Increment',
@@ -87,6 +88,7 @@ ALIAS_MAP = {
     'billing_increments': 'Billing Increment',
     'billing_inc': 'Billing Increment',
     'billing': 'Billing Increment',
+    'billingincrement': 'Billing Increment',
 }
 
 
