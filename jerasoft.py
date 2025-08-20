@@ -301,7 +301,6 @@ def export_rates_by_query(
 
     return result
 
-
 if __name__ == "__main__":
     # Example quick-start (reads API key from env):
     info = export_rates_by_query(

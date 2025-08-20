@@ -220,5 +220,3 @@ if __name__ == "__main__":
     result = compare(left, right, AS_OF_DATE, NOTICE_DAYS, RATE_TOL)
     write_excel(result, OUT_FILE)
     print(f"Wrote {OUT_FILE} with {len(result)} rows.")
-
-

@@ -28,9 +28,6 @@ from preprocess_data import load_clean_rates
 from typing import Iterable, Tuple, Optional
 from datetime import datetime, timezone
 
-
-
-
 #_____________ Email Verification Script_____________
 
 after = "2025-08-19"              # only include emails on/after this date (YYYY-MM-DD) or None
@@ -214,7 +211,7 @@ def clean_preprocessed_folders(attachments_dir: str | Path):
 
 clean_preprocessed_folders("attachments")
 
-# #________________ Ratesheet Comparision Script _____________
+#________________ Ratesheet Comparision Script _____________
 
 ALLOWED_EXTS = {".xlsx", ".xls", ".csv"}
 
@@ -428,9 +425,6 @@ def compare_preprocessed_folders(
     print(f"Comparison files made: {writes}")
     return folders_done, writes
 
-
-# run
 compare_preprocessed_folders("attachments", notice_days=7, rate_tol=0.0)
 
-# #________________ Database Script _____________
-
+#________________ Database Script _____________
