@@ -43,7 +43,12 @@ def read_table(path: str, sheet: Optional[str] = None) -> pd.DataFrame:
     df["_rate_raw"] = df[COL_RATE]
     df[COL_RATE] = pd.to_numeric(df[COL_RATE], errors="coerce")
     df["_edate_raw"] = df[COL_EDATE]
-    df[COL_EDATE] = pd.to_datetime(df[COL_EDATE], errors="coerce", utc=True).dt.tz_convert(None)
+    # df[COL_EDATE] = pd.to_datetime(df[COL_EDATE], errors="coerce", utc=True).dt.tz_convert(None)
+    df[COL_EDATE] = (
+    pd.to_datetime(df[COL_EDATE], errors="coerce", utc=True)
+      .dt.tz_convert(None)     # drop timezone
+      .dt.normalize()          # <-- force to 00:00:00
+    )
     df[COL_BI] = df[COL_BI].astype(str).str.strip()
 
     df.dropna(how='all', inplace=True)
@@ -99,9 +104,17 @@ def compare(left: pd.DataFrame, right: pd.DataFrame, as_of_date: Optional[str], 
     right_only = merged["_merge"].eq("right_only")
     both = merged["_merge"].eq("both")
 
+    # as_of = pd.to_datetime(as_of_date, errors="coerce")
+    # if pd.isna(as_of):
+    #     as_of = pd.Timestamp.utcnow().tz_localize(None)
+
     as_of = pd.to_datetime(as_of_date, errors="coerce")
     if pd.isna(as_of):
-        as_of = pd.Timestamp.utcnow().tz_localize(None)
+        as_of = pd.Timestamp.now().normalize()
+    else:
+        as_of = as_of.normalize()
+
+
 
     rows = []
     old_rate = merged[f"{COL_RATE}_old"].astype(float)

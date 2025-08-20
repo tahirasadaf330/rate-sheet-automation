@@ -18,5 +18,8 @@
   "comparision_result": {
     "result": "no comparisons succeeded",
     "comparison_difference.xlsx": false
+  },
+  "results_pushed": {
+    "_comparision_result.xlsx": true
   }
 }

@@ -7,7 +7,6 @@ Step 4: run the ratesheet comparision script to generate the comparision report
 Step 5: run the database script to push the comparision results to the database 
 
 """
-
 """
 while saving the files from email also create a meta data file for that directory that should include subject, sender, date, time
 path to the directory.
@@ -25,9 +24,10 @@ import os
 import json
 from pathlib import Path
 from preprocess_data import load_clean_rates
-from typing import Iterable, Tuple, Optional
+from typing import Iterable, Tuple, Optional, Dict, Any, List
 from datetime import datetime, timezone
-
+from database import insert_rate_upload, bulk_insert_rate_upload_details
+import pandas as pd
 #_____________ Email Verification Script_____________
 
 after = "2025-08-19"              # only include emails on/after this date (YYYY-MM-DD) or None
@@ -393,7 +393,7 @@ def compare_preprocessed_folders(
                 result = compare(left_df, right_df, as_of_date, notice_days, rate_tol)
 
                 # NEW: always name by vendor file + "_comparision_difference.xlsx"
-                out_path = folder / f"{v.stem}_comparision_difference.xlsx"
+                out_path = folder / f"{v.stem}_comparision_result.xlsx"
 
 
                 write_excel(result, str(out_path))
@@ -428,3 +428,208 @@ def compare_preprocessed_folders(
 compare_preprocessed_folders("attachments", notice_days=7, rate_tol=0.0)
 
 #________________ Database Script _____________
+
+ATTACHMENTS_ROOT = "attachments"
+_ALLOWED_EXTS = {".xlsx", ".xls", ".csv"}
+
+EXPECTED_COLS = ["Code", "Old Rate", "New Rate", "Effective Date", "Status", "Change Type", "Notes"]
+
+# ------------ metadata helpers ------------
+
+def load_metadata(folder: Path) -> Optional[Dict[str, Any]]:
+    meta = folder / "metadata.json"
+    if not meta.exists():
+        return None
+    try:
+        with meta.open("r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+def save_metadata(folder: Path, data: Dict[str, Any]) -> None:
+    meta = folder / "metadata.json"
+    with meta.open("w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+def comparison_result_ok(meta: Dict[str, Any]) -> bool:
+    """
+    True iff metadata has a result 'ok' under either:
+      meta['comparison_result']['result']  or  meta['comparision_result']['result']
+    """
+    d = meta.get("comparison_result") or meta.get("comparision_result")
+    if not isinstance(d, dict):
+        return False
+    return str(d.get("result", "")).strip().lower() == "ok"
+
+def parse_received_at(meta: Dict[str, Any]) -> Optional[datetime]:
+    raw = meta.get("receivedDateTime_raw")
+    if isinstance(raw, str) and raw.strip():
+        try:
+            s = raw.strip().replace("Z", "+00:00")
+            return datetime.fromisoformat(s).astimezone(timezone.utc)
+        except Exception:
+            pass
+    date_s = meta.get("date_utc")
+    time_s = meta.get("time_utc")
+    if isinstance(date_s, str) and date_s:
+        try:
+            if isinstance(time_s, str) and time_s:
+                dt = datetime.fromisoformat(f"{date_s}T{time_s}")
+            else:
+                dt = datetime.fromisoformat(f"{date_utc}T00:00:00")
+            return dt.replace(tzinfo=timezone.utc)
+        except Exception:
+            return None
+    return None
+
+def mark_results_pushed(folder: Path, filename: str, success: bool) -> None:
+    meta = load_metadata(folder) or {}
+    rp = meta.get("results_pushed")
+    if not isinstance(rp, dict):
+        rp = {}
+    rp[filename] = bool(success)
+    meta["results_pushed"] = rp
+    save_metadata(folder, meta)
+
+# ------------ file discovery ------------
+
+def find_result_files(folder: Path) -> List[Path]:
+    """
+    Return files whose stem **ends with** '_comparision_result' (case-insensitive)
+    and have an allowed extension.
+    """
+    out: List[Path] = []
+    for f in sorted(folder.iterdir()):
+        if not f.is_file():
+            continue
+        if f.suffix.lower() not in _ALLOWED_EXTS:
+            continue
+        if f.stem.lower().endswith("_comparision_result"):
+            out.append(f)
+    return out
+
+# ------------ reading & transform ------------
+
+def read_comparison_table(path: Path) -> pd.DataFrame:
+    ext = path.suffix.lower()
+    if ext in (".xlsx", ".xls"):
+        df = pd.read_excel(path)
+    elif ext == ".csv":
+        df = pd.read_csv(path)
+    else:
+        raise ValueError(f"Unsupported file type: {path.suffix}")
+
+    # robust column rename
+    rename_map: Dict[str, str] = {}
+    cols_norm = {c: " ".join(str(c).strip().split()).lower() for c in df.columns}
+    for c, n in cols_norm.items():
+        if n == "code": rename_map[c] = "Code"
+        elif n == "old rate": rename_map[c] = "Old Rate"
+        elif n == "new rate": rename_map[c] = "New Rate"
+        elif n == "effective date": rename_map[c] = "Effective Date"
+        elif n == "status": rename_map[c] = "Status"
+        elif n == "change type": rename_map[c] = "Change Type"
+        elif n == "notes": rename_map[c] = "Notes"
+    df = df.rename(columns=rename_map)
+
+    missing = [c for c in EXPECTED_COLS if c not in df.columns]
+    if missing:
+        raise ValueError(f"{path.name}: missing expected columns {missing}. Found: {list(df.columns)}")
+
+    df = df[EXPECTED_COLS].copy()
+    df["Code"] = df["Code"].astype(str).str.strip()
+    df["Old Rate"] = pd.to_numeric(df["Old Rate"], errors="coerce")
+    df["New Rate"] = pd.to_numeric(df["New Rate"], errors="coerce")
+    df["Effective Date"] = pd.to_datetime(df["Effective Date"], errors="coerce", utc=True)
+    df.dropna(how="all", inplace=True)
+    return df
+
+def df_to_detail_dicts(df: pd.DataFrame) -> List[Dict[str, Any]]:
+    details: List[Dict[str, Any]] = []
+    for _, r in df.iterrows():
+        eff = r["Effective Date"]
+        eff_py = None if pd.isna(eff) else eff.to_pydatetime()  # tz-aware UTC
+        details.append({
+            "dst_code": None if pd.isna(r["Code"]) else str(r["Code"]).strip(),
+            "rate_existing": None if pd.isna(r["Old Rate"]) else float(r["Old Rate"]),
+            "rate_new": None if pd.isna(r["New Rate"]) else float(r["New Rate"]),
+            "effective_date": eff_py,
+            "change_type": None if pd.isna(r["Change Type"]) else str(r["Change Type"]).strip(),
+            "status": None if pd.isna(r["Status"]) else str(r["Status"]).strip(),
+            "notes": None if pd.isna(r["Notes"]) else str(r["Notes"]).strip(),
+        })
+    return details
+
+# ------------ main pipeline ------------
+
+def push_all_ok_results(attachments_root: str | Path) -> Tuple[int, int, int]:
+    """
+    For each folder whose metadata compar(i)son_result.result == 'ok':
+      - insert into rate_uploads (sender, received_at)
+      - read every file ending with *_comparision_result.{xlsx|xls|csv}
+      - bulk insert rows into rate_upload_details
+      - update metadata.json -> results_pushed[filename] = True/False
+    Returns: (folders_processed, files_processed, rows_inserted_total)
+    """
+    root = Path(attachments_root).expanduser().resolve()
+    if not root.exists():
+        raise FileNotFoundError(f"Attachments directory not found: {root}")
+
+    folders_done = 0
+    files_done = 0
+    rows_total = 0
+
+    print("\n=== DB push over OK comparison-result folders ===")
+    for child in sorted(root.iterdir()):
+        if not child.is_dir():
+            continue
+
+        meta = load_metadata(child)
+        if not meta or not comparison_result_ok(meta):
+            continue
+
+        rp = meta.get("results_pushed")
+        if isinstance(rp, dict) and rp:
+            print(f"  [SKIP] results_pushed present for {child.name}; skipping folder")
+            continue
+
+        result_files = find_result_files(child)
+        if not result_files:
+            continue
+
+        folders_done += 1
+        print(f"\n[FOLDER] {child}")
+
+        sender = str(meta.get("sender") or "").strip()
+        received_at = parse_received_at(meta)
+
+        try:
+            upload_id = insert_rate_upload(sender_email=sender or None, received_at=received_at)
+        except Exception as e:
+            print(f"  ✖ Failed to create rate_upload row: {e}")
+            # mark all files as failed push (since we can't create the parent upload)
+            for f in result_files:
+                mark_results_pushed(child, f.name, False)
+            continue
+
+        for f in result_files:
+            print(f"  - Processing {f.name}")
+            try:
+                df = read_comparison_table(f)
+                details = df_to_detail_dicts(df)
+                inserted = bulk_insert_rate_upload_details(upload_id, details)
+                rows_total += inserted
+                files_done += 1
+                print(f"    ✔ inserted {inserted} rows")
+                mark_results_pushed(child, f.name, True)
+            except Exception as e:
+                print(f"    ✖ failed to insert from {f.name}: {e}")
+                mark_results_pushed(child, f.name, False)
+
+    print("\n=== DB push summary ===")
+    print(f"Folders processed: {folders_done}")
+    print(f"Files processed:   {files_done}")
+    print(f"Rows inserted:     {rows_total}")
+    return folders_done, files_done, rows_total
+
+push_all_ok_results(ATTACHMENTS_ROOT)
