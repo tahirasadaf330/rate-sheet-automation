@@ -70,7 +70,7 @@ ALIAS_MAP = {
     'pricing': 'Rate',
     'price': 'Rate',
     'pricing_in': 'Rate',
-    'rate/min($)': 'Rate',
+    'rate_min($)': 'Rate',
 
     # Effective Date
     'effective_date': 'Effective Date',

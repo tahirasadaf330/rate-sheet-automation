@@ -1,15 +1,26 @@
 {
-  "subject": "Quickcom tel PRM trunk Prefix:1001 USD",
-  "sender": "muhammad.uzair@hayo.net",
-  "date_utc": "2025-08-19",
-  "time_utc": "08:22:51",
-  "directory": "C:\\Users\\User\\OneDrive - Hayo Telecom, Inc\\Documents\\Work\\Rate Sheet Automation\\rate-sheet-automation\\attachments\\muhammad.uzair_at_hayo.net_20250819_082251",
-  "attachment_count": 2,
-  "attachments": [
-    "fetched_data.csv",
-    "QUICKCOM-PREMIUM-20250814-FULL_1_.xlsx"
-  ],
-  "receivedDateTime_raw": "2025-08-19T08:22:51Z",
-  "processed_at_utc": "2025-08-19T11:00:18Z",
-  "preprocessed": true
+    "subject": "Quickcom tel PRM trunk Prefix:1001 USD",
+    "sender": "muhammad.uzair@hayo.net",
+    "date_utc": "2025-08-19",
+    "time_utc": "08:22:51",
+    "directory": "C:\\Users\\User\\OneDrive - Hayo Telecom, Inc\\Documents\\Work\\Rate Sheet Automation\\rate-sheet-automation\\attachments\\muhammad.uzair_at_hayo.net_20250819_082251",
+    "attachment_count": 2,
+    "attachments": [
+        "fetched_data.csv",
+        "QUICKCOM-PREMIUM-20250814-FULL_1_.xlsx"
+    ],
+    "receivedDateTime_raw": "2025-08-19T08:22:51Z",
+    "processed_at_utc": "2025-08-19T11:00:18Z",
+    "preprocessed": true,
+    "preprocessed_results": {
+        "fetched_data.csv": false,
+        "jerasoft_comparison_all.xlsx": true,
+        "QUICKCOM-PREMIUM-20250814-FULL_1_.xlsx": true,
+        "QUICKCOM-PREMIUM-20250814-FULL_1__comparision_difference.xlsx": false
+    },
+    "comparision_result": {
+        "result": "ok",
+        "fetched_data.csv": false,
+        "QUICKCOM-PREMIUM-20250814-FULL_1_.xlsx": true
+    }
 }

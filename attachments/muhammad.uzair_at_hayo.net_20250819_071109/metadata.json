@@ -10,5 +10,13 @@
   ],
   "receivedDateTime_raw": "2025-08-19T07:11:09Z",
   "processed_at_utc": "2025-08-19T11:00:21Z",
-  "preprocessed": true
+  "preprocessed": true,
+  "preprocessed_results": {
+    "comparison_difference.xlsx": false,
+    "comparison_difference_jerasoft_comparison.xlsx": true
+  },
+  "comparision_result": {
+    "result": "no comparisons succeeded",
+    "comparison_difference.xlsx": false
+  }
 }

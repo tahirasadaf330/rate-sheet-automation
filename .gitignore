@@ -2,3 +2,75 @@
 test_files/
 venv/
 attachemetnts/
+
+
+
+
+
+hey great now lets jump to the next step which is rate sheet comparision heres the code that i am using:
+
+``
+LEFT_FILE = r"test_files\Second_File_Updated_cleaned.xlsx" #current rate file
+RIGHT_FILE = r"test_files\First_File_Updated_cleaned.xlsx" #new rate file
+OUT_FILE = "comparison.xlsx"
+AS_OF_DATE = "2025-07-08"
+NOTICE_DAYS = 7
+RATE_TOL = 0.0
+SHEET_LEFT = None
+SHEET_RIGHT = None
+
+left = read_table(LEFT_FILE, SHEET_LEFT)
+right = read_table(RIGHT_FILE, SHEET_RIGHT)
+result = compare(left, right, AS_OF_DATE, NOTICE_DAYS, RATE_TOL)
+write_excel(result, OUT_FILE)
+print(f"Wrote {OUT_FILE} with {len(result)} rows.")``
+
+now i want you to write  a code that does the following:
+
+- go inside each directory and read the metadata file and only go with directories that has preprocessed true other wise reject that directory
+
+- then inside the metadata file go to preprocessed_results and see which files has ture flags
+be careful here are few of the edge cases:
+
+first chech the file name which has the comparison word in its name if it is set to false then we dont have to continue we have to skip the the entire next process
+
+``  "preprocessed_results": {
+        "fetched_data.csv": false,
+        "jerasoft_comparison_all.xlsx": false,
+        "QUICKCOM-PREMIUM-20250814-FULL_1_.xlsx": true
+    }``
+
+then after this create a new dict in the metadata file as
+comparision_result: {'result': "comparision failed because of the issues in the comparison file'}
+
+- now if the file with name comparision in it is true like this :
+
+ "preprocessed_results": {
+        "fetched_data.csv": false,
+        "jerasoft_comparison_all.xlsx": true,
+        "QUICKCOM-PREMIUM-20250814-FULL_1_.xlsx": true
+    }
+
+then we are good to go so what you have to next is to check other files which we have to compare with the comparision one and all the other files are there to compare.
+look in the above example you see the 'fetched_data.csv' is set to false it means there was some sort of issue in this file we can't use it so what you will do is 
+
+simply in this dic comparision_result: {'file name' : false}
+
+which will show that we didn't did comparision with this / or there was some sort of issue
+
+then will move to second file which is this acc to our above example:   "QUICKCOM-PREMIUM-20250814-FULL_1_.xlsx": true
+
+this one has a flag of true so we are good to make it for comparison
+
+now you have to fill these variables
+LEFT_FILE = r"path of the file with comparision inside its name" #current rate file
+RIGHT_FILE = r"other file which we are going to compare" #new rate file
+OUT_FILE = "path should be the same directory you can get that from the key directory and the name should be like the name of the file which we compared like QUICKCOM-PREMIUM-20250814-FULL_1_.xlsx and at the end attach this QUICKCOM-PREMIUM-20250814-FULL_1_.comparision_result.xlsx "
+
+if there is some error or it got successfully compared update the status in the comparision result accordingly true or false in case of failure
+
+
+now go ahead and ask me questions if you have any query or just simply return me the code if you got everyting
+
+
+
