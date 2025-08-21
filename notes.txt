@@ -1,3 +1,10 @@
 Quickcom tel PRM trunk Prefix:001 USD
 
-make sure the code can hold multiple files
+make sure the code can hold multiple files (done)
+
+check how it is comparing the rates 0.13, 0.1300 
+
+add a soft note for backdated increase	
+decimal limit to 4.	
+show the unchannged as well	
+

@@ -425,7 +425,7 @@ def compare_preprocessed_folders(
     print(f"Comparison files made: {writes}")
     return folders_done, writes
 
-compare_preprocessed_folders("attachments", notice_days=7, rate_tol=0.0)
+compare_preprocessed_folders("attachments", notice_days=7, rate_tol=0.0001)  #check the difference upto 4 decimal places.
 
 #________________ Database Script _____________
 
