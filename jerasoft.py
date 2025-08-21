@@ -17,8 +17,8 @@ Configuration:
 - API URL & KEY are read from env by default: JERA_SOFT_API_KEY, JERASOFT_API_URL
 - You can also pass `api_url` / `api_key` explicitly to any function.
 """
-from __future__ import annotations
 
+from __future__ import annotations
 import os
 import re
 import json
@@ -26,12 +26,10 @@ from pathlib import Path
 from datetime import datetime
 from difflib import SequenceMatcher
 from typing import Dict, List, Tuple, Optional
-
 import pandas as pd
 import requests
-
-
 from dotenv import load_dotenv
+
 load_dotenv()
 
 # -------------------------------------------------------------------
@@ -49,7 +47,6 @@ _session = requests.Session()
 _norm_space = re.compile(r"\s+")
 _norm_hashes = re.compile(r"[#]+")
 
-
 def normalize(s: str) -> str:
     s = s or ""
     s = s.lower().strip()
@@ -57,7 +54,6 @@ def normalize(s: str) -> str:
     s = s.replace(".", " ")
     s = _norm_space.sub(" ", s)
     return s.strip()
-
 
 def fuzzy_score(a: str, b: str) -> float:
     """Blend of SequenceMatcher and Jaccard, in [0,1]."""
@@ -67,14 +63,11 @@ def fuzzy_score(a: str, b: str) -> float:
     jacc = (len(a_tokens & b_tokens) / len(a_tokens | b_tokens)) if (a_tokens and b_tokens) else 0.0
     return 0.85 * base + 0.15 * jacc
 
-
 def name_starts_with_term(name: str) -> bool:
     return str(name).lstrip().upper().startswith("TERM")
 
-
 def name_contains_company(name: str, company_kw: str) -> bool:
     return company_kw in normalize(name)
-
 
 def extract_company_keyword(query: str) -> str:
     """Derive company keyword from the first token (alnum, ., _, -)."""
@@ -89,7 +82,6 @@ def _post_json(api_url: str, payload: Dict, timeout: int = 500) -> Dict:
     resp = _session.post(api_url, headers=DEFAULT_HEADERS, json=payload, timeout=timeout)
     resp.raise_for_status()
     return resp.json()
-
 
 def fetch_all_tables(api_url: Optional[str] = None, api_key: Optional[str] = None, page_size: int = 500) -> List[Dict]:
     """Fetch all rate tables via pagination."""
@@ -116,7 +108,6 @@ def fetch_all_tables(api_url: Optional[str] = None, api_key: Optional[str] = Non
         all_tables.extend(page)
         offset += page_size
     return all_tables
-
 
 def find_best_term_table(
     target_query: str,
@@ -157,7 +148,6 @@ def find_best_term_table(
 
     # Truncate scored list to top_k for display/return brevity
     return int(best_id), best_table, scored[:top_k]
-
 
 def fetch_active_current_future_rates(
     table_id: int,
@@ -241,8 +231,6 @@ def fetch_active_current_future_rates(
     })
 
     return df_selected.reset_index(drop=True)
-
-
 
 def save_rates_to_excel(df: pd.DataFrame, output_path: str) -> str:
     """Save DataFrame to Excel, ensuring parent folder exists. Returns absolute path."""

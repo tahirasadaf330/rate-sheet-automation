@@ -510,11 +510,7 @@ def process_inbox(session: requests.Session, user_email: str, after: Optional[st
 
 def verify_fetch_emails(after: str, before: str, unread_only: bool = True) -> None:
     cfg = load_env()
-
-    # ---- Hardcoded settings instead of CLI arguments ----
-    after = "2025-08-19"              # only include emails on/after this date (YYYY-MM-DD) or None
-    before = "2025-08-19"             # only include emails on/before this date (YYYY-MM-DD) or None
-    unread_only = False    
+   
     page_size = 50                    # number of messages per API call
     filetypes = ".csv,.xlsx,.pdf"     # allowed file extensions
     attachments_dir = "attachments"   # base directory where attachments are saved

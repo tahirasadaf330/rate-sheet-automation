@@ -16,7 +16,6 @@ then read that meta data file and create all the comparision files using jerasof
 then preprocess all the files 
 
 """
-
 from jerasoft import export_rates_by_query
 from ratesheet_comparision_engine import read_table, compare, write_excel
 from email_verification import verify_fetch_emails
@@ -28,10 +27,11 @@ from typing import Iterable, Tuple, Optional, Dict, Any, List
 from datetime import datetime, timezone
 from database import insert_rate_upload, bulk_insert_rate_upload_details
 import pandas as pd
+from typing import Any 
 #_____________ Email Verification Script_____________
 
-after = "2025-08-19"              # only include emails on/after this date (YYYY-MM-DD) or None
-before = "2025-08-19"             # only include emails on/before this date (YYYY-MM-DD) or None
+after = "2025-08-21"              # only include emails on/after this date (YYYY-MM-DD) or None
+before = "2025-08-21"             # only include emails on/before this date (YYYY-MM-DD) or None
 unread_only = False    
 verify_fetch_emails(after, before, unread_only)
 
@@ -482,12 +482,12 @@ def parse_received_at(meta: Dict[str, Any]) -> Optional[datetime]:
             return None
     return None
 
-def mark_results_pushed(folder: Path, filename: str, success: bool) -> None:
+def mark_results_pushed(folder: Path, filename: str, status: Any) -> None:
     meta = load_metadata(folder) or {}
     rp = meta.get("results_pushed")
     if not isinstance(rp, dict):
         rp = {}
-    rp[filename] = bool(success)
+    rp[filename] = status 
     meta["results_pushed"] = rp
     save_metadata(folder, meta)
 
@@ -616,6 +616,10 @@ def push_all_ok_results(attachments_root: str | Path) -> Tuple[int, int, int]:
             print(f"  - Processing {f.name}")
             try:
                 df = read_comparison_table(f)
+                if df.empty:
+                    print("    ⚠ empty comparison file; nothing to push")
+                    mark_results_pushed(child, f.name, "empty file no results to push to the data base")
+                    continue
                 details = df_to_detail_dicts(df)
                 inserted = bulk_insert_rate_upload_details(upload_id, details)
                 rows_total += inserted

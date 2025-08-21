@@ -106,3 +106,6 @@ def bulk_insert_rate_upload_details(
         return inserted
 
 
+
+
+# insert_authorized_senders(VERIFIED_SENDERS)
