@@ -2,9 +2,20 @@ Quickcom tel PRM trunk Prefix:001 USD
 
 make sure the code can hold multiple files (done)
 
-check how it is comparing the rates 0.13, 0.1300 
+check how it is comparing the rates 0.13, 0.1300 (done)
 
-add a soft note for backdated increase	
-decimal limit to 4.	
-show the unchannged as well	
+add a soft note for backdated increase (done)	
 
+decimal limit to 4.	(done)
+
+show the unchannged as well	(done)
+
+
+
+
+===============
+
+add try and catch in the main.py file too>
+
+add some fallback mfachanism like if it failed to fetch the file from jerasoft and retry 
+and also for the db as well...

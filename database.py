@@ -3,7 +3,7 @@ from dotenv import load_dotenv
 import psycopg2
 from psycopg2.extras import execute_values
 from valid_emails import VERIFIED_SENDERS
-from typing import Iterable, Dict, Any, Optional
+from typing import Iterable, Dict, Any, Optional, List
 from datetime import datetime
 from decimal import Decimal
 
@@ -62,22 +62,70 @@ def insert_rate_upload(sender_email: str, received_at: Optional[datetime] = None
         print(f"Inserted rate upload from {sender_email} → id={rate_upload_id}")
         return rate_upload_id
     
-# -----------------------------
-# 3) BULK insert many details for the same rate_upload_id
-# -----------------------------
+# # -----------------------------
+# # 3) BULK insert many details for the same rate_upload_id
+# # -----------------------------
+# def bulk_insert_rate_upload_details(
+#     rate_upload_id: int,
+#     details: Iterable[Dict[str, Any]],
+# ) -> int:
+#     """
+#     Bulk insert many rows into rate_upload_details for one rate_upload_id.
+#     Each dict supports keys: dst_code (required), rate_existing, rate_new,
+#     effective_date, change_type, status, notes.
+#     Returns number of inserted rows.
+#     """
+#     rows = []
+#     for d in details:
+#         rows.append((
+#             rate_upload_id,
+#             d["dst_code"],
+#             d.get("rate_existing"),
+#             d.get("rate_new"),
+#             d.get("effective_date"),
+#             d.get("change_type"),
+#             d.get("status"),
+#             d.get("notes"),
+#         ))
+
+#     if not rows:
+#         return 0
+
+#     query = """
+#         INSERT INTO rate_upload_details
+#         (rate_upload_id, dst_code, rate_existing, rate_new, effective_date,
+#          change_type, status, notes, created_at, updated_at)
+#         VALUES %s;
+#     """
+#     values_tpl = "(%s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())"
+
+#     with get_conn() as conn, conn.cursor() as cur:
+#         execute_values(cur, query, rows, template=values_tpl)
+#         inserted = cur.rowcount
+#         conn.commit()
+#         return inserted
+
+
+
+
+
+
+
+def _chunked(seq: List[tuple], size: int):
+    for i in range(0, len(seq), size):
+        yield seq[i:i+size]
+
 def bulk_insert_rate_upload_details(
     rate_upload_id: int,
     details: Iterable[Dict[str, Any]],
+    batch_size: int = 1000,   # tune as needed
 ) -> int:
     """
-    Bulk insert many rows into rate_upload_details for one rate_upload_id.
-    Each dict supports keys: dst_code (required), rate_existing, rate_new,
-    effective_date, change_type, status, notes.
-    Returns number of inserted rows.
+    Bulk insert rows and return the TRUE total inserted count.
+    Works even when execute_values paginates internally.
     """
-    rows = []
-    for d in details:
-        rows.append((
+    rows = [
+        (
             rate_upload_id,
             d["dst_code"],
             d.get("rate_existing"),
@@ -86,26 +134,37 @@ def bulk_insert_rate_upload_details(
             d.get("change_type"),
             d.get("status"),
             d.get("notes"),
-        ))
-
+        )
+        for d in details
+    ]
     if not rows:
         return 0
 
-    query = """
+    sql = """
         INSERT INTO rate_upload_details
         (rate_upload_id, dst_code, rate_existing, rate_new, effective_date,
          change_type, status, notes, created_at, updated_at)
-        VALUES %s;
+        VALUES %s
+        RETURNING 1
     """
-    values_tpl = "(%s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())"
+    tpl = "(%s,%s,%s,%s,%s,%s,%s,%s,NOW(),NOW())"
 
+    total = 0
     with get_conn() as conn, conn.cursor() as cur:
-        execute_values(cur, query, rows, template=values_tpl)
-        inserted = cur.rowcount
+        for chunk in _chunked(rows, batch_size):
+            # Ensure a single statement per chunk by making page_size=len(chunk)
+            try:
+                # psycopg2>=2.8 supports fetch=True: returns all RETURNING rows across pages
+                returned = execute_values(
+                    cur, sql, chunk, template=tpl, page_size=len(chunk), fetch=True
+                )
+                total += len(returned) if returned is not None else 0
+            except TypeError:
+                # Older psycopg2: no fetch kwarg. Use rowcount per chunk.
+                execute_values(cur, sql, chunk, template=tpl, page_size=len(chunk))
+                total += cur.rowcount  # count for this chunk (single statement)
         conn.commit()
-        return inserted
+    return total
 
 
-
-
-# insert_authorized_senders(VERIFIED_SENDERS)
+# # insert_authorized_senders(VERIFIED_SENDERS)

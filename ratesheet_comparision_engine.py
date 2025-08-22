@@ -3,19 +3,6 @@ from typing import Optional, List
 import pandas as pd
 import numpy as np
 
-# ===========================
-# CONFIGURATION
-# ===========================
-LEFT_FILE = r"test_files\Second_File_Updated_cleaned.xlsx" #current rate file
-RIGHT_FILE = r"test_files\First_File_Updated_cleaned.xlsx" #new rate file
-OUT_FILE = "comparison.xlsx"
-AS_OF_DATE = "2025-07-08"
-NOTICE_DAYS = 7
-RATE_TOL = 0.0
-SHEET_LEFT = None
-SHEET_RIGHT = None
-# ===========================
-
 COL_CODE = "Dst Code"
 COL_RATE = "Rate"
 COL_EDATE = "Effective Date"
@@ -43,7 +30,6 @@ def read_table(path: str, sheet: Optional[str] = None) -> pd.DataFrame:
     df["_rate_raw"] = df[COL_RATE]
     df[COL_RATE] = pd.to_numeric(df[COL_RATE], errors="coerce")
     df["_edate_raw"] = df[COL_EDATE]
-    # df[COL_EDATE] = pd.to_datetime(df[COL_EDATE], errors="coerce", utc=True).dt.tz_convert(None)
     df[COL_EDATE] = (
     pd.to_datetime(df[COL_EDATE], errors="coerce", utc=True)
       .dt.tz_convert(None)     # drop timezone
@@ -103,19 +89,11 @@ def compare(left: pd.DataFrame, right: pd.DataFrame, as_of_date: Optional[str], 
     left_only = merged["_merge"].eq("left_only")
     right_only = merged["_merge"].eq("right_only")
     both = merged["_merge"].eq("both")
-
-    # as_of = pd.to_datetime(as_of_date, errors="coerce")
-    # if pd.isna(as_of):
-    #     as_of = pd.Timestamp.utcnow().tz_localize(None)
-
     as_of = pd.to_datetime(as_of_date, errors="coerce")
     if pd.isna(as_of):
         as_of = pd.Timestamp.now().normalize()
     else:
         as_of = as_of.normalize()
-
-
-
     rows = []
     old_rate = merged[f"{COL_RATE}_old"].astype(float)
     new_rate = merged[f"{COL_RATE}_new"].astype(float)
@@ -197,9 +175,14 @@ def compare(left: pd.DataFrame, right: pd.DataFrame, as_of_date: Optional[str], 
                         print("   Normal Decrease")
                         change_type = "Decrease"
                         status = "Accepted"
+                        notes.append("normal decrease")
                 else:
-                    print("   Unchanged → skipping row")
-                    continue
+                    # print("   Unchanged → skipping row")
+                    # continue
+                    # Include unchanged rows in the output
+                    change_type = "Unchanged"
+                    status = "Ignored"
+                    notes.append(f"no change identified")
             else:
                 print(" → Cannot compare rates (invalid data)")
                 change_type = "Increase"
@@ -218,7 +201,6 @@ def compare(left: pd.DataFrame, right: pd.DataFrame, as_of_date: Optional[str], 
         out = out.sort_values(by=["Code", "Change Type"], kind="mergesort")
     print(f"\n▶ Finished. Produced {len(out)} rows after comparison")
     return out
-
 
 def write_excel(df: pd.DataFrame, path: str) -> None:
     with pd.ExcelWriter(path, engine="xlsxwriter") as writer:
