@@ -1,5 +1,4 @@
 VERIFIED_SENDERS = [
-    "muhammad.uzair@hayo.net",
     "rates@382com.com",
     "rates@42com-int.com",
     "rates@917consulting.net",

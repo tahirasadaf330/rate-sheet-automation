@@ -19,3 +19,11 @@ add try and catch in the main.py file too>
 
 add some fallback mfachanism like if it failed to fetch the file from jerasoft and retry 
 and also for the db as well...
+
+
+===============
+
+also maintain a log of all the files which should show why the email fails?
+
+
+the code is skipting the already received emails but is it also skipping if it already has the jerasoft files?
