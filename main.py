@@ -33,6 +33,7 @@ from typing import Any
 after = "2025-08-21"              # only include emails on/after this date (YYYY-MM-DD) or None
 before = "2025-08-21"             # only include emails on/before this date (YYYY-MM-DD) or None
 unread_only = False    
+ATTEMPTS = 2
 verify_fetch_emails(after, before, unread_only)
 
 #_______________ Jerasoft Script _____________
@@ -94,15 +95,25 @@ def process_all_directories(attachments_base="attachments"):
 
         output_path = str(Path(dir_path) / output_file)
 
-        # Call your export function
-        try:
-            info = export_rates_by_query(
-                target_query=subject,
-                output_path=output_path,
-            )
-            print(f"[SUCCESS] Exported for {subject} -> {output_path}")
-        except Exception as e:
-            print(f"[ERROR] Failed to export for {subject}: {e}")
+        info = None
+        for attempt in range(1, ATTEMPTS + 1):
+            try:
+                info = export_rates_by_query(subject, output_path)
+                print(f"[SUCCESS] Exported for {subject} -> {output_path} (attempt {attempt})")
+                break
+            except Exception as e:
+                if attempt < ATTEMPTS:
+                    print(f"[WARN] Attempt {attempt} failed for {subject}: {e}. Retrying...")
+                    continue  # optional; the loop would continue anyway
+                # final attempt
+                print(f"[ERROR] Failed after {ATTEMPTS} attempts for {subject}: {e}")
+                # no raise: we exit the loop and continue program flow
+                # (optionally record failure somewhere)
+                break
+
+        # later in your code:
+        if info is None:
+            print(f"[SKIP] {subject} not exported; moving on.")
 
 
 process_all_directories()
@@ -208,13 +219,11 @@ def clean_preprocessed_folders(attachments_dir: str | Path):
     print(f"Files cleaned:     {files_done}")
     return folders_done, files_done
 
-
 clean_preprocessed_folders("attachments")
 
 #________________ Ratesheet Comparision Script _____________
 
 ALLOWED_EXTS = {".xlsx", ".xls", ".csv"}
-
 
 def iter_preprocessed_dirs(attachments_root: Path) -> Iterable[Path]:
     """
@@ -236,7 +245,6 @@ def iter_preprocessed_dirs(attachments_root: Path) -> Iterable[Path]:
         if bool(data.get("preprocessed")) is True and "comparision_result" not in data:
             yield child
 
-
 def find_jerasoft_file(folder: Path) -> Optional[Path]:
     """Prefer jerasoft_comparison_all.xlsx, else first *_jerasoft_comparison.xlsx."""
     prime = folder / "jerasoft_comparison_all.xlsx"
@@ -249,7 +257,6 @@ def find_jerasoft_file(folder: Path) -> Optional[Path]:
         and p.name.lower().endswith("_jerasoft_comparison.xlsx")
     )
     return candidates[0] if candidates else None
-
 
 def vendor_files(folder: Path) -> list[Path]:
     """All candidate files except metadata.json and JeraSoft comparison outputs."""
@@ -268,7 +275,6 @@ def vendor_files(folder: Path) -> list[Path]:
         out.append(f)
     return out
 
-
 def as_of_from_metadata(folder: Path) -> str:
     """Use metadata.date_utc if available, else today (UTC, YYYY-MM-DD)."""
     meta = folder / "metadata.json"
@@ -283,16 +289,13 @@ def as_of_from_metadata(folder: Path) -> str:
             pass
     return datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
-
 def _read_metadata(folder: Path) -> dict:
     with (folder / "metadata.json").open("r", encoding="utf-8") as f:
         return json.load(f)
 
-
 def _write_metadata(folder: Path, data: dict) -> None:
     with (folder / "metadata.json").open("w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
-
 
 def compare_preprocessed_folders(
     attachments_dir: str | Path,
