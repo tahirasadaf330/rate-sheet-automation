@@ -41,7 +41,7 @@ verify_fetch_emails(after, before, unread_only)
 def process_all_directories(attachments_base="attachments"):
     """
     Walk through all directories inside `attachments/`,
-    check metadata.json, update preprocessed flag,
+    check metadata.json, update jerasoft_preprocessed flag,
     and call export_rates_by_query with correct parameters.
     """
     for subdir in Path(attachments_base).iterdir():
@@ -61,16 +61,10 @@ def process_all_directories(attachments_base="attachments"):
             print(f"[ERROR] Failed to read {meta_file}: {e}")
             continue
 
-        # Skip if already preprocessed
-        if meta.get("preprocessed") is True:
-            print(f"[SKIP] Already preprocessed: {subdir}")
+        # Skip if already jerasoft_preprocessed
+        if meta.get("jerasoft_preprocessed") is True:
+            print(f"[SKIP] Already jerasoft_preprocessed: {subdir}")
             continue
-
-        # Mark preprocessed
-        meta["preprocessed"] = True
-        with open(meta_file, "w", encoding="utf-8") as f:
-            json.dump(meta, f, indent=2)
-        print(f"[INFO] Updated metadata with preprocessed flag: {meta_file}")
 
         # Extract subject
         subject = meta.get("subject")
@@ -99,6 +93,13 @@ def process_all_directories(attachments_base="attachments"):
         for attempt in range(1, ATTEMPTS + 1):
             try:
                 info = export_rates_by_query(subject, output_path)
+                
+                # Mark jerasoft_preprocessed
+                meta["jerasoft_preprocessed"] = True
+                with open(meta_file, "w", encoding="utf-8") as f:
+                    json.dump(meta, f, indent=2)
+                print(f"[INFO] Updated metadata with jerasoft_preprocessed flag: {meta_file}")
+                
                 print(f"[SUCCESS] Exported for {subject} -> {output_path} (attempt {attempt})")
                 break
             except Exception as e:
@@ -107,25 +108,20 @@ def process_all_directories(attachments_base="attachments"):
                     continue  # optional; the loop would continue anyway
                 # final attempt
                 print(f"[ERROR] Failed after {ATTEMPTS} attempts for {subject}: {e}")
-                # no raise: we exit the loop and continue program flow
-                # (optionally record failure somewhere)
                 break
 
-        # later in your code:
         if info is None:
             print(f"[SKIP] {subject} not exported; moving on.")
-
 
 process_all_directories()
 
 #_______________ Preprocess Script _____________
 
-
 ALLOWED_EXTS = {".xlsx", ".xls", ".csv"}
 
 def iter_preprocessed_dirs(attachments_root: Path):
     """
-    Yield directories under attachments_root whose metadata.json has "preprocessed": true.
+    Yield directories under attachments_root whose metadata.json has "jerasoft_preprocessed": true.
     """
     for child in sorted(attachments_root.iterdir()):
         if not child.is_dir():
@@ -137,11 +133,14 @@ def iter_preprocessed_dirs(attachments_root: Path):
             with meta.open("r", encoding="utf-8") as f:
                 data = json.load(f)
         except Exception:
-            # If metadata is unreadable, skip silently (or print a warning if you want)
+            print('  ✖ Failed to load metadata')
             continue
-        # AFTER
-        if bool(data.get("preprocessed")) is True and "preprocessed_results" not in data:
-            yield child
+
+        if bool(data.get("jerasoft_preprocessed")) is True:
+            results = data.get("preprocessed_results", {})
+            if not results or any(v is False for v in results.values()):
+                yield child
+
 
 def files_to_clean(folder: Path):
     """
@@ -152,12 +151,14 @@ def files_to_clean(folder: Path):
             continue
         if f.name.lower() == "metadata.json":
             continue
+        if f.name.startswith("~$") or f.name.startswith("."):
+             continue
         if f.suffix.lower() in ALLOWED_EXTS:
             yield f
 
 def clean_preprocessed_folders(attachments_dir: str | Path):
     """
-    For each preprocessed folder:
+    For each jerasoft_preprocessed folder:
       - run load_clean_rates(file, file, 0) for every allowed file inside.
     Updates metadata.json with success/failure for each file.
     Returns (folders_processed, files_cleaned).
@@ -169,7 +170,7 @@ def clean_preprocessed_folders(attachments_dir: str | Path):
     folders_done = 0
     files_done = 0
 
-    print("\n=== Cleaning pass over preprocessed folders ===")
+    print("\n=== Cleaning pass over jerasoft_preprocessed folders ===")
     for folder in iter_preprocessed_dirs(root):
         folders_done += 1
         print(f"\n[FOLDER] {folder}")
@@ -227,23 +228,28 @@ ALLOWED_EXTS = {".xlsx", ".xls", ".csv"}
 
 def iter_preprocessed_dirs(attachments_root: Path) -> Iterable[Path]:
     """
-    Yield preprocessed directories that have NOT yet been compared
-    (metadata.json has preprocessed=True and NO 'comparision_result' key).
+    Yield folders that finished JeraSoft and still need comparison:
+    - no comparision_result yet, or
+    - comparision_result exists but at least one vendor flag is not True.
     """
     for child in sorted(attachments_root.iterdir()):
         if not child.is_dir():
             continue
-        meta = child / "metadata.json"
-        if not meta.exists():
+        meta_path = child / "metadata.json"
+        if not meta_path.exists():
             continue
         try:
-            with meta.open("r", encoding="utf-8") as f:
+            with meta_path.open("r", encoding="utf-8") as f:
                 data = json.load(f)
         except Exception:
             continue
 
-        if bool(data.get("preprocessed")) is True and "comparision_result" not in data:
-            yield child
+        if data.get("jerasoft_preprocessed") is True:
+            comp = data.get("comparision_result") or {}
+            per_vendor = {k: v for k, v in comp.items() if k != "result"}
+            # run if no result yet, or any vendor isn’t exactly True
+            if not comp or any(v is not True for v in per_vendor.values()):
+                yield child
 
 def find_jerasoft_file(folder: Path) -> Optional[Path]:
     """Prefer jerasoft_comparison_all.xlsx, else first *_jerasoft_comparison.xlsx."""
@@ -307,12 +313,12 @@ def compare_preprocessed_folders(
 ) -> Tuple[int, int]:
     """
     Folder-level logic:
-      1) Require 'preprocessed' True and absence of 'comparision_result'.
-      2) Confirm comparison/baseline file exists AND was preprocessed True.
-         - If its preprocessed flag is False (or missing), skip folder and write:
+      1) Require 'jerasoft_preprocessed' True and absence of 'comparision_result'.
+      2) Confirm comparison/baseline file exists AND was jerasoft_preprocessed True.
+         - If its jerasoft_preprocessed flag is False (or missing), skip folder and write:
            comparision_result: {"result": "...skipped because comparison file failed..."}
       3) Otherwise, for each vendor file:
-         - If vendor file's preprocessed flag is False/missing -> comparision_result[filename] = False
+         - If vendor file's jerasoft_preprocessed flag is False/missing -> comparision_result[filename] = False
          - Else run compare; success -> True, failure -> False
       4) Write comparision_result to metadata once per folder.
     """
@@ -323,7 +329,7 @@ def compare_preprocessed_folders(
     folders_done = 0
     writes = 0
 
-    print("\n=== Comparison pass over preprocessed folders ===")
+    print("\n=== Comparison pass over jerasoft_preprocessed folders ===")
     for folder in iter_preprocessed_dirs(root):
         folders_done += 1
         print(f"\n[FOLDER] {folder}")
@@ -347,11 +353,11 @@ def compare_preprocessed_folders(
             _write_metadata(folder, meta)
             continue
 
-        # 2) check baseline preprocessed flag
+        # 2) check baseline jerasoft_preprocessed flag
         baseline_name = left_path.name
         baseline_ok = bool(preproc_map.get(baseline_name))
         if not baseline_ok:
-            print("  ✖ Baseline comparison file exists but was not successfully preprocessed. Skipping folder.")
+            print("  ✖ Baseline comparison file exists but was not successfully jerasoft_preprocessed. Skipping folder.")
             meta["comparision_result"] = {
                 "result": "comparison skipped: comparison file failed preprocessing"
             }
@@ -385,9 +391,9 @@ def compare_preprocessed_folders(
             vname = v.name
             print(f"  - Compare against vendor: {vname}")
 
-            # gate on vendor preprocessed flag
+            # gate on vendor jerasoft_preprocessed flag
             if not preproc_map.get(vname):
-                print("    ↳ skipped: vendor file not successfully preprocessed")
+                print("    ↳ skipped: vendor file not successfully jerasoft_preprocessed")
                 comp_result[vname] = False
                 continue
 
@@ -397,7 +403,6 @@ def compare_preprocessed_folders(
 
                 # NEW: always name by vendor file + "_comparision_difference.xlsx"
                 out_path = folder / f"{v.stem}_comparision_result.xlsx"
-
 
                 write_excel(result, str(out_path))
                 writes += 1
@@ -450,9 +455,14 @@ def load_metadata(folder: Path) -> Optional[Dict[str, Any]]:
         return None
 
 def save_metadata(folder: Path, data: Dict[str, Any]) -> None:
-    meta = folder / "metadata.json"
-    with meta.open("w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    # atomic write to avoid corrupting metadata.json
+    path = folder / "metadata.json"
+    import tempfile, os
+    with tempfile.NamedTemporaryFile("w", delete=False, encoding="utf-8", dir=folder) as tmp:
+        json.dump(data, tmp, ensure_ascii=False, indent=2)
+        tmp.flush(); os.fsync(tmp.fileno())
+        tmpname = tmp.name
+    os.replace(tmpname, path)
 
 def comparison_result_ok(meta: Dict[str, Any]) -> bool:
     """
@@ -474,13 +484,15 @@ def parse_received_at(meta: Dict[str, Any]) -> Optional[datetime]:
             pass
     date_s = meta.get("date_utc")
     time_s = meta.get("time_utc")
-    if isinstance(date_s, str) and date_s:
+    if isinstance(date_s, str) and date_s.strip():
         try:
-            if isinstance(time_s, str) and time_s:
-                dt = datetime.fromisoformat(f"{date_s}T{time_s}")
+            ts = f"{date_s.strip()}T{(time_s or '00:00:00').strip()}"
+            dt = datetime.fromisoformat(ts)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
             else:
-                dt = datetime.fromisoformat(f"{date_utc}T00:00:00")
-            return dt.replace(tzinfo=timezone.utc)
+                dt = dt.astimezone(timezone.utc)
+            return dt
         except Exception:
             return None
     return None
@@ -490,7 +502,7 @@ def mark_results_pushed(folder: Path, filename: str, status: Any) -> None:
     rp = meta.get("results_pushed")
     if not isinstance(rp, dict):
         rp = {}
-    rp[filename] = status 
+    rp[filename] = status
     meta["results_pushed"] = rp
     save_metadata(folder, meta)
 
@@ -541,6 +553,7 @@ def read_comparison_table(path: Path) -> pd.DataFrame:
 
     df = df[EXPECTED_COLS].copy()
     df["Code"] = df["Code"].astype(str).str.strip()
+    df = df[df["Code"].ne("")]  # drop empty codes
     df["Old Rate"] = pd.to_numeric(df["Old Rate"], errors="coerce")
     df["New Rate"] = pd.to_numeric(df["New Rate"], errors="coerce")
     df["Effective Date"] = pd.to_datetime(df["Effective Date"], errors="coerce", utc=True)
@@ -591,13 +604,27 @@ def push_all_ok_results(attachments_root: str | Path) -> Tuple[int, int, int]:
         if not meta or not comparison_result_ok(meta):
             continue
 
-        rp = meta.get("results_pushed")
-        if isinstance(rp, dict) and rp:
-            print(f"  [SKIP] results_pushed present for {child.name}; skipping folder")
-            continue
-
         result_files = find_result_files(child)
         if not result_files:
+            continue
+
+        # Only push files for vendors that compare stage marked True
+        comp = (meta.get("comparision_result") or meta.get("comparison_result") or {})
+        ok_vendor_stems = {Path(k).stem for k, v in comp.items() if k != "result" and v is True}
+
+        def _vendor_stem_from_result_file(p: Path) -> str:
+            s = p.stem
+            suf = "_comparision_result"
+            return s[:-len(suf)] if s.endswith(suf) else s
+
+        result_files = [f for f in result_files if _vendor_stem_from_result_file(f) in ok_vendor_stems]
+        if not result_files:
+            continue
+
+        rp = meta.get("results_pushed") or {}
+        already_all = result_files and all(rp.get(f.name) is True for f in result_files)
+        if already_all:
+            print(f"  [SKIP] all results already pushed for {child.name}")
             continue
 
         folders_done += 1
@@ -610,12 +637,20 @@ def push_all_ok_results(attachments_root: str | Path) -> Tuple[int, int, int]:
             upload_id = insert_rate_upload(sender_email=sender or None, received_at=received_at)
         except Exception as e:
             print(f"  ✖ Failed to create rate_upload row: {e}")
-            # mark all files as failed push (since we can't create the parent upload)
+            # mark only not-yet-pushed files as failed
             for f in result_files:
+                if rp.get(f.name) is True:
+                    continue
                 mark_results_pushed(child, f.name, False)
             continue
 
+        # per-file skip for already-pushed
+        rp = meta.get("results_pushed") or {}
         for f in result_files:
+            if rp.get(f.name) is True:
+                print(f"  - Skipping already pushed: {f.name}")
+                continue
+
             print(f"  - Processing {f.name}")
             try:
                 df = read_comparison_table(f)

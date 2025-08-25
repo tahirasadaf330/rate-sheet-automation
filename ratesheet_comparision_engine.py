@@ -177,9 +177,6 @@ def compare(left: pd.DataFrame, right: pd.DataFrame, as_of_date: Optional[str], 
                         status = "Accepted"
                         notes.append("normal decrease")
                 else:
-                    # print("   Unchanged → skipping row")
-                    # continue
-                    # Include unchanged rows in the output
                     change_type = "Unchanged"
                     status = "Ignored"
                     notes.append(f"no change identified")

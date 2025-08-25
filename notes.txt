@@ -16,7 +16,7 @@ show the unchannged as well	(done)
 ===============
 use open ai for the subject validation (kind of hybrid or just free for all) also for file cleaning and validation.
 
-add try and catch in the main.py file too>
+add try and catch in the main.py file too> (done)
 
 add some fallback mfachanism like if it failed to fetch the file from jerasoft and retry 
 and also for the db as well...
