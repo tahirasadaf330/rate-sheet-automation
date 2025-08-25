@@ -109,8 +109,8 @@ def compare(left: pd.DataFrame, right: pd.DataFrame, as_of_date: Optional[str], 
         n_date = r.get(f"{COL_EDATE}_new", pd.NaT)
         notes: List[str] = []
 
-        print(f"\n--- Row {i} | Code={code} ---")
-        print(f" OldRate={o_rate}, NewRate={n_rate}, EffDate={n_date}, BI_old={r.get(f'{COL_BI}_old')}, BI_new={r.get(f'{COL_BI}_new')}")
+        # print(f"\n--- Row {i} | Code={code} ---")
+        # print(f" OldRate={o_rate}, NewRate={n_rate}, EffDate={n_date}, BI_old={r.get(f'{COL_BI}_old')}, BI_new={r.get(f'{COL_BI}_new')}")
 
         if right_only[i]:
             print(" → Detected as NEW")
@@ -206,9 +206,3 @@ def write_excel(df: pd.DataFrame, path: str) -> None:
         ws.autofilter(0, 0, max(0, len(df)), max(0, df.shape[1]-1))
         ws.freeze_panes(1, 0)
 
-if __name__ == "__main__":
-    left = read_table(LEFT_FILE, SHEET_LEFT)
-    right = read_table(RIGHT_FILE, SHEET_RIGHT)
-    result = compare(left, right, AS_OF_DATE, NOTICE_DAYS, RATE_TOL)
-    write_excel(result, OUT_FILE)
-    print(f"Wrote {OUT_FILE} with {len(result)} rows.")
