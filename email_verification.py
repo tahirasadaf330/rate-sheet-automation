@@ -539,10 +539,13 @@ def process_inbox(session: requests.Session, user_email: str, after: Optional[st
                 print("  -> skip: sender NOT in VERIFIED_SENDERS")
                 skipped_sender += 1
                 continue
-            if not subject_ok(subject):
+
+            parsed = validate_subject(subject)
+            if not parsed:
                 print("  -> skip: subject does not match SUBJECT_PATTERN")
                 skipped_subject += 1
                 continue
+
             if not has_attachments:
                 print("  -> skip: no attachments (hasAttachments=False)")
                 skipped_no_attach += 1
@@ -594,6 +597,7 @@ def process_inbox(session: requests.Session, user_email: str, after: Optional[st
             meta = {
                 "subject": subject,
                 "sender": sender,
+                "company": parsed.get("company"),
                 "date_utc": date_only,
                 "time_utc": time_only,
                 "directory": os.path.abspath(save_dir),

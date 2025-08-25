@@ -244,7 +244,6 @@ def save_rates_to_excel(df: pd.DataFrame, output_path: str) -> str:
     df.to_excel(out_path, index=False)
     return str(out_path)
 
-
 def export_rates_by_query(
     target_query: str,
     output_path: str,
@@ -292,7 +291,7 @@ def export_rates_by_query(
 if __name__ == "__main__":
     # Example quick-start (reads API key from env):
     info = export_rates_by_query(
-        target_query="Quickcom tel PRM trunk Prefix:1001 USD",
+        target_query="lalaghsdh",
         output_path="quickcom_rates.xlsx",
     )
     print(json.dumps(info, indent=2))

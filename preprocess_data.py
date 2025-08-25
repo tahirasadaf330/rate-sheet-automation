@@ -39,13 +39,11 @@ def detect_header_row(raw: pd.DataFrame) -> int:
         f"after normalization/aliasing. Required: {REQUIRED_COLS}"
     )
 
-
 def _norm(s: str) -> str:
     s = str(s).strip().lower()
     s = s.replace('-', ' ').replace('/', ' ')
     s = ' '.join(s.split())            # collapse spaces
     return s.replace(' ', '_')         # final form, e.g. "effective_date"
-
 
 # Map of normalized header variants -> canonical
 ALIAS_MAP = {
@@ -91,7 +89,6 @@ ALIAS_MAP = {
     'billing': 'Billing Increment',
     'billingincrement': 'Billing Increment',
 }
-
 
 def _canonicalize_headers(df: pd.DataFrame) -> pd.DataFrame:
     original = list(df.columns)
@@ -242,7 +239,6 @@ def load_clean_rates(path: str, output_path: str, sheet=0) -> pd.DataFrame:
     # keep only canonical required columns
     df = df[REQUIRED_COLS].copy()
 
-
     # ── clean fields ────────────────────────────────────────────────────────
     df['Dst Code'] = df['Dst Code'].astype(str).str.strip()
 
@@ -258,11 +254,9 @@ def load_clean_rates(path: str, output_path: str, sheet=0) -> pd.DataFrame:
     df['Rate'] = pd.to_numeric(s, errors='coerce')
     df['Billing Increment'] = df['Billing Increment'].astype(str).str.strip().apply(clean_billing_increment)
 
-
     df['Effective Date'] = df['Effective Date'].apply(normalise_date_any)
 
     df.to_excel(output_path, index=False)
-
 
 # ──────────────────────────── quick test ─────────────────────────────────────
 if __name__ == '__main__':

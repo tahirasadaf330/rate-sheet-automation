@@ -147,7 +147,7 @@ def compare(left: pd.DataFrame, right: pd.DataFrame, as_of_date: Optional[str], 
         else:
             if can_compare_rate[i]:
                 delta = n_rate - o_rate
-                print(f" → Rate delta={delta}")
+                # print(f" → Rate delta={delta}")
                 eff_note = effective_note(n_date, as_of, notice_days)
                 if delta > rate_tol:
                     if n_date < as_of:
@@ -205,4 +205,3 @@ def write_excel(df: pd.DataFrame, path: str) -> None:
         ws = writer.sheets["comparison"]
         ws.autofilter(0, 0, max(0, len(df)), max(0, df.shape[1]-1))
         ws.freeze_panes(1, 0)
-

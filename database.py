@@ -42,7 +42,6 @@ def insert_authorized_senders(emails):
         conn.commit()
         print(f"Inserted {cur.rowcount} new emails into authorized_senders.")
 
-
 # -----------------------------
 # 1) Insert into rate_uploads and RETURN id
 # -----------------------------
@@ -62,55 +61,6 @@ def insert_rate_upload(sender_email: str, received_at: Optional[datetime] = None
         print(f"Inserted rate upload from {sender_email} → id={rate_upload_id}")
         return rate_upload_id
     
-# # -----------------------------
-# # 3) BULK insert many details for the same rate_upload_id
-# # -----------------------------
-# def bulk_insert_rate_upload_details(
-#     rate_upload_id: int,
-#     details: Iterable[Dict[str, Any]],
-# ) -> int:
-#     """
-#     Bulk insert many rows into rate_upload_details for one rate_upload_id.
-#     Each dict supports keys: dst_code (required), rate_existing, rate_new,
-#     effective_date, change_type, status, notes.
-#     Returns number of inserted rows.
-#     """
-#     rows = []
-#     for d in details:
-#         rows.append((
-#             rate_upload_id,
-#             d["dst_code"],
-#             d.get("rate_existing"),
-#             d.get("rate_new"),
-#             d.get("effective_date"),
-#             d.get("change_type"),
-#             d.get("status"),
-#             d.get("notes"),
-#         ))
-
-#     if not rows:
-#         return 0
-
-#     query = """
-#         INSERT INTO rate_upload_details
-#         (rate_upload_id, dst_code, rate_existing, rate_new, effective_date,
-#          change_type, status, notes, created_at, updated_at)
-#         VALUES %s;
-#     """
-#     values_tpl = "(%s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())"
-
-#     with get_conn() as conn, conn.cursor() as cur:
-#         execute_values(cur, query, rows, template=values_tpl)
-#         inserted = cur.rowcount
-#         conn.commit()
-#         return inserted
-
-
-
-
-
-
-
 def _chunked(seq: List[tuple], size: int):
     for i in range(0, len(seq), size):
         yield seq[i:i+size]
@@ -165,6 +115,5 @@ def bulk_insert_rate_upload_details(
                 total += cur.rowcount  # count for this chunk (single statement)
         conn.commit()
     return total
-
 
 # insert_authorized_senders(VERIFIED_SENDERS)

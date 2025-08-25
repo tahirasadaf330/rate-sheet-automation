@@ -1,4 +1,3 @@
-
 """ 
 Step 1: run the email verification script to fetch all the new valid files which will be stored in the attachments folder
 Step 2: then run the jerasoft script to fetch all the relevant tables for comparision
@@ -67,9 +66,9 @@ def process_all_directories(attachments_base="attachments"):
             continue
 
         # Extract subject
-        subject = meta.get("subject")
-        if not subject:
-            print(f"[WARN] No subject found in {meta_file}, skipping...")
+        company = meta.get("company")
+        if not company:
+            print(f"[WARN] No company found in {meta_file}, skipping...")
             continue
 
         # Extract directory and attachments
@@ -90,28 +89,25 @@ def process_all_directories(attachments_base="attachments"):
         output_path = str(Path(dir_path) / output_file)
 
         info = None
-        for attempt in range(1, ATTEMPTS + 1):
-            try:
-                info = export_rates_by_query(subject, output_path)
-                
-                # Mark jerasoft_preprocessed
-                meta["jerasoft_preprocessed"] = True
-                with open(meta_file, "w", encoding="utf-8") as f:
-                    json.dump(meta, f, indent=2)
-                print(f"[INFO] Updated metadata with jerasoft_preprocessed flag: {meta_file}")
-                
-                print(f"[SUCCESS] Exported for {subject} -> {output_path} (attempt {attempt})")
-                break
-            except Exception as e:
-                if attempt < ATTEMPTS:
-                    print(f"[WARN] Attempt {attempt} failed for {subject}: {e}. Retrying...")
-                    continue  # optional; the loop would continue anyway
-                # final attempt
-                print(f"[ERROR] Failed after {ATTEMPTS} attempts for {subject}: {e}")
-                break
+        try:
+            info = export_rates_by_query(company, output_path)
+
+            if info:
+                meta["best_table_name"] = info.get("best_table_name")
+
+            # Only mark true if the export call didn’t blow up
+            meta["jerasoft_preprocessed"] = True
+            with open(meta_file, "w", encoding="utf-8") as f:
+                json.dump(meta, f, indent=2)
+            print(f"[INFO] Updated metadata with jerasoft_preprocessed flag: {meta_file}")
+
+            print(f"[SUCCESS] Exported for {company} -> {output_path}")
+        except Exception as e:
+            print(f"[ERROR] Export failed for {company}: {e}")
 
         if info is None:
-            print(f"[SKIP] {subject} not exported; moving on.")
+            print(f"[SKIP] {company} not exported; moving on.")
+
 
 process_all_directories()
 
@@ -140,7 +136,6 @@ def iter_preprocessed_dirs(attachments_root: Path):
             results = data.get("preprocessed_results", {})
             if not results or any(v is False for v in results.values()):
                 yield child
-
 
 def files_to_clean(folder: Path):
     """
