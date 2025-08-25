@@ -42,24 +42,149 @@ def dbg(*args, **kwargs):
 
 SCOPES = ["https://graph.microsoft.com/.default"]
 
-SUBJECT_PATTERN = re.compile(r"""
+VERIFIED = {e.lower().strip() for e in VERIFIED_SENDERS}
+
+# ------------------------- Subject Normalization & Parsing -------------------------
+
+def _normalize_subject(s: Optional[str]) -> Optional[str]:
+    if not s:
+        return None
+    s = unicodedata.normalize("NFKC", s)
+    s = re.sub(r"[:;|,/\\]+", " ", s)            # common separators → space
+    s = re.sub(r"[^A-Za-z0-9_\-\s]", " ", s)     # drop ~!@#$%^&*()[]{}<>'"?.+= etc.
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
+
+# Strict/ordered patterns
+_FREEFORM = re.compile(r"""
     ^\s*
-    (?:\[(?P<company1>[^\]]+)\]
-      |(?P<company2>[A-Za-z0-9&().,'\-\s+/]+?)
-    )
-    \s+
+    (?P<company>[A-Za-z0-9_\-\s]+?)\s+
     (?P<trunk>[A-Za-z][\w\-]*)
-    \s+
-    trunk
-    \s+
-    prefix\s*:?\s*
-    (?P<prefix>none|\d+)
-    \s*
-    (?P<currency>[A-Za-z]{3})
-    \s*$
+    (?:\s+trunk\b)?\s+prefix\b\s*(?P<prefix>none|\d+)\s+
+    (?P<currency>[A-Za-z]{3})\s*$
 """, re.IGNORECASE | re.VERBOSE)
 
-VERIFIED = {e.lower().strip() for e in VERIFIED_SENDERS}
+_BRACKETED_LIKE = re.compile(r"""
+    ^\s*
+    (?P<company>[A-Za-z0-9_\-\s]+?)\s+
+    (?P<trunk>\S+)\s+
+    (?P<prefix>none|\d+)\s+
+    (?P<currency>[A-Za-z]{3})\s*$
+""", re.IGNORECASE | re.VERBOSE)
+
+_NO_LABELS = re.compile(r"""
+    ^\s*
+    (?P<company>.+?)\s+
+    (?P<trunk>[A-Za-z][\w\-]*)\s+
+    (?P<prefix>\d+|none)\s+
+    (?P<currency>[A-Za-z]{3})\s*$
+""", re.IGNORECASE | re.VERBOSE)
+
+_ANYORDER = re.compile(r"^(?=.*\bprefix\b)(?=.*\b[A-Za-z]{3}\b).*$", re.IGNORECASE)
+
+def _first_3letter_currency(tokens):
+    for t in reversed(tokens):
+        if re.fullmatch(r"[A-Za-z]{3}", t):
+            return t.upper()
+    return None
+
+def _normalize_output(company: str, trunk: str, prefix, currency: str) -> Optional[Dict[str, object]]:
+    company = (company or "").strip(" ._-")
+    trunk = (trunk or "").strip()
+    currency = (currency or "").strip().upper()
+    if not company or not trunk or not re.fullmatch(r"[A-Z]{3}", currency):
+        return None
+    if isinstance(prefix, str):
+        if prefix.lower() == "none":
+            prefix = None
+        elif prefix.isdigit():
+            prefix = int(prefix)
+        else:
+            return None
+    elif prefix is not None and not isinstance(prefix, int):
+        return None
+    if not re.fullmatch(r"[A-Za-z][\w\-]*", trunk):
+        return None
+    return {"company": company, "trunk": trunk, "prefix": prefix, "currency": currency}
+
+def _extract_anyorder(subject: str) -> Optional[Dict[str, object]]:
+    tokens = subject.split()
+    currency = _first_3letter_currency(tokens)
+    if not currency:
+        return None
+    prefix = None
+    for i, t in enumerate(tokens):
+        if t.lower() == "prefix":
+            cand = tokens[i+1] if i + 1 < len(tokens) else ""
+            val = cand.lower()
+            if val == "none":
+                prefix = None
+                break
+            if re.fullmatch(r"\d+", val):
+                prefix = int(val)
+                break
+    if prefix is None:
+        try:
+            cur_idx = len(tokens) - 1 - list(reversed(tokens)).index(currency)
+            if cur_idx - 1 >= 0 and re.fullmatch(r"\d+", tokens[cur_idx - 1]):
+                prefix = int(tokens[cur_idx - 1])
+        except ValueError:
+            pass
+    trunk = None
+    for i, t in enumerate(tokens):
+        if t.lower() == "trunk":
+            if i - 1 >= 0 and re.fullmatch(r"[A-Za-z][\w\-]*", tokens[i-1]):
+                trunk = tokens[i-1]
+                break
+            if i + 1 < len(tokens) and re.fullmatch(r"[A-Za-z][\w\-]*", tokens[i+1]):
+                trunk = tokens[i+1]
+                break
+    if trunk is None:
+        for t in tokens:
+            if t.lower() in {"prefix", "none", currency.lower()}:
+                continue
+            if re.fullmatch(r"[A-Za-z][\w\-]*", t):
+                trunk = t
+                break
+    company = None
+    if trunk:
+        try:
+            trunk_idx = tokens.index(trunk)
+            head = [w for w in tokens[:trunk_idx] if w.lower() not in {"trunk", "prefix"}]
+            company = " ".join(head).strip()
+        except ValueError:
+            pass
+    if not company:
+        drop = {currency.lower(), "trunk", "prefix", str(prefix) if prefix is not None else ""}
+        rest = [w for w in tokens if w.lower() not in drop and not re.fullmatch(r"\d+", w)]
+        company = " ".join(rest).strip()
+    return _normalize_output(company, trunk, prefix, currency)
+
+def validate_subject(subject: Optional[str]) -> Optional[Dict[str, object]]:
+    if not subject:
+        return None
+    s = _normalize_subject(subject)
+    if not s:
+        return None
+    for rx in (_FREEFORM, _BRACKETED_LIKE, _NO_LABELS):
+        m = rx.match(s)
+        if m:
+            gd = m.groupdict()
+            return _normalize_output(gd.get("company",""), gd.get("trunk",""), gd.get("prefix",""), gd.get("currency",""))
+    if _ANYORDER.match(s):
+        parsed = _extract_anyorder(s)
+        if parsed:
+            return parsed
+    parts = s.split()
+    if len(parts) >= 4:
+        maybe_currency, maybe_prefix, trunk = parts[-1], parts[-2], parts[-3]
+        if re.fullmatch(r"[A-Za-z]{3}", maybe_currency) and re.fullmatch(r"(?:\d+|none)", maybe_prefix, flags=re.I):
+            company = " ".join(parts[:-3]).strip()
+            return _normalize_output(company, trunk, maybe_prefix, maybe_currency)
+    return None
+
+def subject_ok(s: Optional[str]) -> bool:
+    return validate_subject(s) is not None
 
 # ------------------------- Utilities -------------------------
 
@@ -189,9 +314,6 @@ def strip_html(html: str) -> str:
 def message_sender(msg: dict) -> str:
     frm = (msg.get("from") or {}).get("emailAddress") or {}
     return (frm.get("address") or "").lower().strip()
-
-def subject_ok(subj: Optional[str]) -> bool:
-    return bool(subj and SUBJECT_PATTERN.match(subj))
 
 def save_matching_attachments_for_user(session: requests.Session, user_email: str, msg_id: str,
                                        allowed_exts: Set[str], save_dir: str,

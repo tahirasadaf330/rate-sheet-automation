@@ -1,4 +1,4 @@
-Quickcom tel PRM trunk Prefix:001 USD
+Quickcom tel com PRM trunk Prefix:001 USD
 
 make sure the code can hold multiple files (done)
 
@@ -14,6 +14,7 @@ show the unchannged as well	(done)
 
 
 ===============
+use open ai for the subject validation (kind of hybrid or just free for all)
 
 add try and catch in the main.py file too>
 
@@ -27,3 +28,43 @@ also maintain a log of all the files which should show why the email fails?
 
 
 the code is skipting the already received emails but is it also skipping if it already has the jerasoft files?
+
+
+like if the process is failed on one directory then it doesn't make sense to repeat ex number of steps on that directory
+
+
+try to make the footer detection dynamic as well
+
+
+
+==================
+
+some new subjects to test
+
+from: rates@mapletele.com
+  subject: Partial Rate Notification - ID No. 123809 - HAYO_CLI
+  is_unread: True | has_attachments: True
+
+   from: rates@rigelvoice.com
+  subject: Rigel Voice - Full Rate Notification for HAYOTEL - Gold
+  is_unread: False | has_attachments: True
+  -> skip: subject does not match SUBJECT_PATTERN
+
+    from: rates@vasudev.com
+  subject: [Vasudev Global Pte Ltd.] [Prime] [11] [USD]
+  is_unread: False | has_attachments: True
+  -> skip: subject does not match SUBJECT_PATTERN
+
+
+[8/36] MSG id=AAMkAGY1YmM3YTkwLWE1YTgtNDc5Yi04ZDBmLTEzNjY3Mjc5OTVkOQBGAAAAAADtqXYOa627SJOboz8X1Xh9BwCDEfFXdYRwQa3Wi-6VTNTJAAAAAAEMAACDEfFXdYRwQa3Wi-6VTNTJAAQIKBJZAAA=
+  receivedDateTime: 2025-08-22T11:30:54Z
+  from: rates@sipstatus.com
+  subject: RE: HAYO FULL A-Z REPLACE ORIG PLATINUM SIPSTATUS COMMUNICATIONS SRL PREFIX:10587
+  is_unread: False | has_attachments: False
+  -> skip: subject does not match SUBJECT_PATTERN
+
+
+ subject: [CALLCARIBE INC] [CC] [#2223] [USD]
+  is_unread: False | has_attachments: True
+  -> skip: subject does not match SUBJECT_PATTERN
+
