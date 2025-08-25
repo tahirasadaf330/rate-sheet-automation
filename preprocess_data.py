@@ -71,6 +71,7 @@ ALIAS_MAP = {
     'price': 'Rate',
     'pricing_in': 'Rate',
     'rate_min($)': 'Rate',
+    'new price': 'Rate',
 
     # Effective Date
     'effective_date': 'Effective Date',
@@ -265,7 +266,7 @@ def load_clean_rates(path: str, output_path: str, sheet=0) -> pd.DataFrame:
 
 # ──────────────────────────── quick test ─────────────────────────────────────
 if __name__ == '__main__':
-    FILE_PATH = r'C:\Users\User\OneDrive - Hayo Telecom, Inc\Documents\Work\Rate Sheet Automation\Code\quickcomefetched389.xlsx'
+    FILE_PATH = r'C:\Users\User\OneDrive - Hayo Telecom, Inc\Documents\Work\Rate Sheet Automation\rate-sheet-automation\attachments\rates_at_callcaribe.com_20250822_101700\CLI_A-Z_Rate_Notification_from_Callcaribe_INC_to_Hayo_Telecom_22082025.xlsx'
     OUTPUT_FILE_PATH = r'test_files/tes_cleaned.xlsx'
     cleaned = load_clean_rates(FILE_PATH, OUTPUT_FILE_PATH, 0)
    

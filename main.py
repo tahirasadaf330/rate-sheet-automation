@@ -30,7 +30,7 @@ import pandas as pd
 from typing import Any 
 #_____________ Email Verification Script_____________
 
-after = "2025-08-25"              # only include emails on/after this date (YYYY-MM-DD) or None
+after = "2025-08-21"              # only include emails on/after this date (YYYY-MM-DD) or None
 before = None           # only include emails on/before this date (YYYY-MM-DD) or None
 unread_only = False    
 ATTEMPTS = 2

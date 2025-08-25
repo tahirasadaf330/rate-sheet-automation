@@ -14,14 +14,18 @@ show the unchannged as well	(done)
 
 
 ===============
-use open ai for the subject validation (kind of hybrid or just free for all)
+use open ai for the subject validation (kind of hybrid or just free for all) also for file cleaning and validation.
 
 add try and catch in the main.py file too>
 
 add some fallback mfachanism like if it failed to fetch the file from jerasoft and retry 
 and also for the db as well...
 
+add bit more details in the metadata file like why the file failed the company name was not matched or the header not found etc..
+incluing the more details like which table from the jerasoft was selected for the comparision.
 
+how you take care of spelling mistakes in the header etc.. while preprocessing the file
+one best thing is to use the llm in a hybrid way first check through the static code then add a fall back to handle the other cases
 ===============
 
 also maintain a log of all the files which should show why the email fails?
@@ -38,6 +42,63 @@ try to make the footer detection dynamic as well
 
 
 ==================
+
+are we doing it right company name allip: 
+
+P] Already preprocessed: attachments\muhammad.uzair_at_hayo.net_20250821_083920
+[SKIP] Already preprocessed: attachments\muhammad.uzair_at_hayo.net_20250821_084921
+[SKIP] No metadata.json in attachments\muhammad.uzair_at_hayo.net_20250822_115437
+[INFO] Updated metadata with preprocessed flag: attachments\rates_at_allip-telecom.com_20250822_124023\metadata.json
+Using company keyword: 'allip'
+[WARN] Attempt 1 failed for [ALLIP][PREMIUM][1062#][USD]: No TERM* tables found containing company 'allip'.. Retrying...
+Using company keyword: 'allip'
+[ERROR] Failed after 2 attempts for [ALLIP][PREMIUM][1062#][USD]: No TERM* tables found containing company 'allip'.
+[SKIP] [ALLIP][PREMIUM][1062#][USD] not exported; moving on.
+[INFO] Updated metadata with preprocessed flag: attachments\rates_at_allip-telecom.com_20250822_125654\metadata.json
+Using company keyword: 'allip'
+[WARN] Attempt 1 failed for [ALLIP][CLI][1072#][USD]: No TERM* tables found containing company 'allip'.. Retrying...
+Using company keyword: 'allip'
+[ERROR] Failed after 2 attempts for [ALLIP][CLI][1072#][USD]: No TERM* tables found containing company 'allip'.
+[SKIP] [ALLIP][CLI][1072#][USD] not exported; moving on.
+[INFO] Updated metadata with preprocessed flag: attachments\rates_at_bankai.net_20250822_125433\metadata.json
+Using company keyword: 'bankai'
+Best match: TERM-BANKAI INTERNATIONAL PVT LTD-PREMIUM(GOLD)-PREFIX:56011 CTH2625 (score 0.298, id 2222)
+[SUCCESS] Exported for [Bankai] [Gold] [56011] [USD] -> C:\Users\User\OneDrive - Hayo Telecom, Inc\Documents\Work\Rate Sheet Automation\rate-sheet-automation\attachments\rates_at_bankai.net_20250822_125433\Bankai_Gold_56011_USD_8__jerasoft_comparison.xlsx (attempt 1)
+[INFO] Updated metadata with preprocessed flag: attachments\rates_at_callcaribe.com_20250822_101700\metadata.json
+Using company keyword: 'callcaribe'
+Best match: TERM-CallCaribe Inc.-CC-PREFIX:#2223 (score 0.486, id 3015)
+[SUCCESS] Exported for [CALLCARIBE INC] [CLI] [#2222] [USD] -> C:\Users\User\OneDrive - Hayo Telecom, Inc\Documents\Work\Rate Sheet Automation\rate-sheet-automation\attachments\rates_at_callcaribe.com_20250822_101700\CLI_A-Z_Rate_Notification_from_Callcaribe_INC_to_Hayo_Telecom_22082025_jerasoft_comparison.xlsx (attempt 1)
+[INFO] Updated metadata with preprocessed flag: attachments\rates_at_callcaribe.com_20250822_102836\metadata.json
+Using company keyword: 'callcaribe'
+Best match: TERM-CallCaribe Inc.-CC-PREFIX:#2223 (score 0.517, id 3015)
+[SUCCESS] Exported for [CALLCARIBE INC] [CC] [#2223] [USD] -> C:\Users\User\OneDrive - Hayo Telecom, Inc\Documents\Work\Rate Sheet Automation\rate-sheet-automation\attachments\rates_at_callcaribe.com_20250822_102836\CC_A-Z_Rate_Notification_from_Callcaribe_INC_to_Hayo_Telecom_22082025_jerasoft_comparison.xlsx (attempt 1)
+[INFO] Updated metadata with preprocessed flag: attachments\rates_at_vasudev.com_20250821_104825\metadata.json
+Using company keyword: 'vasudev'
+Best match: TERM-VASUDEV GLOBAL PTE LIMTED-Ortp-PREFIX:33 (score 0.488, id 3142)
+[SUCCESS] Exported for [Vasudev Global Pte Ltd.] [Prime] [11] [USD] -> C:\Users\User\OneDrive - Hayo Telecom, Inc\Documents\Work\Rate Sheet Automation\rate-sheet-automation\attachments\rates_at_vasudev.com_20250821_104825\CPL_011_HAYO_011-20250821-147736_jerasoft_comparison.xlsx (attempt 1)
+[INFO] Updated metadata with preprocessed flag: attachments\rates_at_vasudev.com_20250822_070155\metadata.json
+Using company keyword: 'vasudev'
+Best match: TERM-VASUDEV GLOBAL PTE LIMTED-Ortp-PREFIX:33 (score 0.488, id 3142)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+======================================
 
 some new subjects to test
 
