@@ -135,7 +135,8 @@ def find_best_term_table(
         if name_starts_with_term(t.get("name", "")) and name_contains_company(t.get("name", ""), company_kw)
     ]
     if not candidates:
-        raise LookupError(f"No TERM* tables found containing company '{company_kw}'.")
+        return f"No TERM* tables found containing company '{company_kw}'.", "", ""
+        # raise LookupError(f"No TERM* tables found containing company '{company_kw}'.")
 
     scored = [(fuzzy_score(t.get("name", ""), target_query), t) for t in candidates]
     scored.sort(key=lambda x: x[0], reverse=True)
@@ -264,6 +265,9 @@ def export_rates_by_query(
     table_id, best_table, top_scored = find_best_term_table(
         target_query=target_query, api_url=api_url, api_key=api_key
     )
+
+    if best_table == "" and top_scored == "":
+        return table_id # error message from find_best_term_table
 
     df = fetch_active_current_future_rates(
         table_id=table_id, api_url=api_url, api_key=api_key

@@ -91,17 +91,28 @@ def process_all_directories(attachments_base="attachments"):
         info = None
         try:
             info = export_rates_by_query(company, output_path)
+            print(info)
 
-            if info:
-                meta["best_table_name"] = info.get("best_table_name")
+            if isinstance(info, str):
+                print(f"[ERROR] Export failed for {company}: {info}")
+                meta["keyword_error"] = info
+                with open(meta_file, "w", encoding="utf-8") as f:
+                    json.dump(meta, f, indent=2)
+                print(f"[INFO] Updated metadata with keyword_error: {meta_file}")
 
-            # Only mark true if the export call didn’t blow up
-            meta["jerasoft_preprocessed"] = True
-            with open(meta_file, "w", encoding="utf-8") as f:
-                json.dump(meta, f, indent=2)
-            print(f"[INFO] Updated metadata with jerasoft_preprocessed flag: {meta_file}")
+            else:
+                print(f"[INFO] Export succeeded for {company}, updating metadata.")
 
-            print(f"[SUCCESS] Exported for {company} -> {output_path}")
+                if info:
+                    meta["best_table_name"] = info.get("best_table_name")
+
+                # Only mark true if the export call didn’t blow up
+                meta["jerasoft_preprocessed"] = True
+                with open(meta_file, "w", encoding="utf-8") as f:
+                    json.dump(meta, f, indent=2)
+                print(f"[INFO] Updated metadata with jerasoft_preprocessed flag/best_table_name: {meta_file}")
+
+                print(f"[SUCCESS] Exported for {company} -> {output_path}")
         except Exception as e:
             print(f"[ERROR] Export failed for {company}: {e}")
 
