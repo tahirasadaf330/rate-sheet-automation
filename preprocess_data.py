@@ -264,5 +264,4 @@ if __name__ == '__main__':
     OUTPUT_FILE_PATH = r'test_files/tes_cleaned.xlsx'
     cleaned = load_clean_rates(FILE_PATH, OUTPUT_FILE_PATH, 0)
    
-
     print('✅ Cleaned and saved.')

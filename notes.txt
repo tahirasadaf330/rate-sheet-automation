@@ -21,22 +21,22 @@ think of other smart ways like using embeddings etc... see which one works bette
 add try and catch in the main.py file too> (done)
 
 add some fallback mfachanism like if it failed to fetch the file from jerasoft and retry 
-and also for the db as well...
+and also for the db as well... (done)
 
 add bit more details in the metadata file like why the file failed the company name was not matched or the header not found etc..
-incluing the more details like which table from the jerasoft was selected for the comparision.
+incluing the more details like which table from the jerasoft was selected for the comparision. (done)
 
 how you take care of spelling mistakes in the header etc.. while preprocessing the file
 one best thing is to use the llm in a hybrid way first check through the static code then add a fall back to handle the other cases
 ===============
 
-also maintain a log of all the files which should show why the email fails?
+also maintain a log of all the files which should show why the email fails? (done)
 
 
-the code is skipting the already received emails but is it also skipping if it already has the jerasoft files?
+the code is skipting the already received emails but is it also skipping if it already has the jerasoft files? (done)
 
 
-like if the process is failed on one directory then it doesn't make sense to repeat ex number of steps on that directory
+like if the process is failed on one directory then it doesn't make sense to repeat ex number of steps on that directory (done)
 
 
 try to make the footer detection dynamic as well
@@ -130,4 +130,8 @@ from: rates@mapletele.com
  subject: [CALLCARIBE INC] [CC] [#2223] [USD]
   is_unread: False | has_attachments: True
   -> skip: subject does not match SUBJECT_PATTERN
+
+
+
+
 

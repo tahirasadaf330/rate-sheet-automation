@@ -26,6 +26,7 @@ import requests
 from msal import ConfidentialClientApplication
 from dotenv import load_dotenv
 from urllib.parse import quote
+from open_ai import validate_subject_openai
 
 from valid_emails import VERIFIED_SENDERS  # list of allowed sender emails
 
@@ -540,11 +541,23 @@ def process_inbox(session: requests.Session, user_email: str, after: Optional[st
                 skipped_sender += 1
                 continue
 
-            parsed = validate_subject(subject)
+            parsed = validate_subject(subject)  # fast regex path
+            source = "regex"
+
             if not parsed:
-                print("  -> skip: subject does not match SUBJECT_PATTERN")
+                source = "openai"
+                try:
+                    parsed = validate_subject_openai(subject)  # RAW subject, not normalized
+                except Exception as e:
+                    print(f"  -> skip: LLM fallback crashed: {e}")
+                    parsed = None
+
+            if not parsed:
+                print(f"  -> skip: subject does not match required fields: {subject!r}")
                 skipped_subject += 1
                 continue
+
+            meta["subject_parse_source"] = source
 
             if not has_attachments:
                 print("  -> skip: no attachments (hasAttachments=False)")

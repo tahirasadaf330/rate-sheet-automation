@@ -265,8 +265,6 @@ VERIFIED_SENDERS = [
     "commercial@we2stars.com",
 ]
 
-
-
 # import re
 
 # # Email validation regex (simplified RFC 5322)
