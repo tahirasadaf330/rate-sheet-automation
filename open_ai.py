@@ -111,3 +111,5 @@ Output:
     currency = currency.upper()
 
     return {"company": company, "trunk": trunk, "prefix": prefix, "currency": currency}
+
+

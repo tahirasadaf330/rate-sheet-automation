@@ -1,6 +1,7 @@
 import pandas as pd, os, re, numpy as np
 from datetime import datetime
 from dateutil import parser as dparse
+from openpyxl import load_workbook
 
 REQUIRED_COLS = [
     'Dst Code', 'Rate', 'Effective Date', 'Billing Increment'
@@ -57,6 +58,7 @@ ALIAS_MAP = {
     'dial_code': 'Dst Code',
     'dialcode': 'Dst Code',
     'codes': 'Dst Code',
+    'dial_codes': 'Dst Code',
 
     # Rate
     'rate': 'Rate',
@@ -70,6 +72,7 @@ ALIAS_MAP = {
     'pricing_in': 'Rate',
     'rate_min($)': 'Rate',
     'new price': 'Rate',
+    'price_peak': 'Rate',
 
     # Effective Date
     'effective_date': 'Effective Date',
@@ -88,6 +91,7 @@ ALIAS_MAP = {
     'billing_inc': 'Billing Increment',
     'billing': 'Billing Increment',
     'billingincrement': 'Billing Increment',
+    'rounding_rules': 'Billing Increment',
 }
 
 def _canonicalize_headers(df: pd.DataFrame) -> pd.DataFrame:
@@ -204,14 +208,25 @@ def normalise_date_any(val) -> pd.Timestamp:
 
     return pd.NaT
 
-def clean_billing_increment(val: str) -> str:
+# def clean_billing_increment(val: str) -> str:
+#     if pd.isna(val):
+#         return ''
+#     parts = [p for p in str(val).split('/') if p.strip().isdigit()]
+#     # If format like 0/1/1, drop leading zero and keep last two numbers
+#     if len(parts) >= 2:
+#         return f"{int(parts[-2])}/{int(parts[-1])}"
+#     return ''
+
+def clean_billing_increment(val) -> str:
+    """Normalize billing increment like 0/1/1, 0-60-60, '0 – 1 – 1', etc. → '1/1' or '60/60'.
+       Takes the LAST TWO numeric tokens found. Returns '' if fewer than two numbers."""
     if pd.isna(val):
         return ''
-    parts = [p for p in str(val).split('/') if p.strip().isdigit()]
-    # If format like 0/1/1, drop leading zero and keep last two numbers
-    if len(parts) >= 2:
-        return f"{int(parts[-2])}/{int(parts[-1])}"
-    return ''
+    nums = re.findall(r'\d+', str(val))
+    if len(nums) < 2:
+        return ''
+    a, b = int(nums[-2]), int(nums[-1])   # int() also strips leading zeros
+    return f"{a}/{b}"
 
 # ───────────────────────────── loader main ───────────────────────────────────
 def load_clean_rates(path: str, output_path: str, sheet=0) -> pd.DataFrame:
@@ -260,8 +275,8 @@ def load_clean_rates(path: str, output_path: str, sheet=0) -> pd.DataFrame:
 
 # ──────────────────────────── quick test ─────────────────────────────────────
 if __name__ == '__main__':
-    FILE_PATH = r'C:\Users\User\OneDrive - Hayo Telecom, Inc\Documents\Work\Rate Sheet Automation\rate-sheet-automation\attachments\rates_at_callcaribe.com_20250822_101700\CLI_A-Z_Rate_Notification_from_Callcaribe_INC_to_Hayo_Telecom_22082025.xlsx'
-    OUTPUT_FILE_PATH = r'test_files/tes_cleaned.xlsx'
+    FILE_PATH = r'C:\Users\User\OneDrive - Hayo Telecom, Inc\Documents\Work\Rate Sheet Automation\rate-sheet-automation\test_files\Express_Teleservice_Corp__rates_to_HAYO_TELECOM_ETS__SIP_Pre_____25_08_2025.xlsx'
+    OUTPUT_FILE_PATH = r'test_files/BICS_cleaned.xlsx'
     cleaned = load_clean_rates(FILE_PATH, OUTPUT_FILE_PATH, 0)
    
     print('✅ Cleaned and saved.')

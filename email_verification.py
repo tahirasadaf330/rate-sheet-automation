@@ -28,6 +28,8 @@ from dotenv import load_dotenv
 from urllib.parse import quote
 from open_ai import validate_subject_openai
 
+import time
+
 from valid_emails import VERIFIED_SENDERS  # list of allowed sender emails
 
 # ========================= Debug Toggles =========================
@@ -544,20 +546,19 @@ def process_inbox(session: requests.Session, user_email: str, after: Optional[st
             parsed = validate_subject(subject)  # fast regex path
             source = "regex"
 
-            if not parsed:
-                source = "openai"
-                try:
-                    parsed = validate_subject_openai(subject)  # RAW subject, not normalized
-                except Exception as e:
-                    print(f"  -> skip: LLM fallback crashed: {e}")
-                    parsed = None
+            # if not parsed:
+            #     source = "openai"
+            #     try:
+            #         time.sleep(7)  # to avoid rate limits
+            #         parsed = validate_subject_openai(subject)  # RAW subject, not normalized
+            #     except Exception as e:
+            #         print(f"  -> skip: LLM fallback crashed: {e}")
+            #         parsed = None
 
             if not parsed:
                 print(f"  -> skip: subject does not match required fields: {subject!r}")
                 skipped_subject += 1
                 continue
-
-            meta["subject_parse_source"] = source
 
             if not has_attachments:
                 print("  -> skip: no attachments (hasAttachments=False)")
@@ -617,7 +618,8 @@ def process_inbox(session: requests.Session, user_email: str, after: Optional[st
                 "attachment_count": len(saved_files),
                 "attachments": saved_files,
                 "receivedDateTime_raw": dt_str,
-                "processed_at_utc": datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+                "processed_at_utc": datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
+                "subject_parsing_source": source
             }
             write_metadata(save_dir, meta)
 

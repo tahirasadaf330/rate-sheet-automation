@@ -131,7 +131,23 @@ from: rates@mapletele.com
   is_unread: False | has_attachments: True
   -> skip: subject does not match SUBJECT_PATTERN
 
+==================================================
 
 
 
+- Column names with spelling mistakes
+- Different ways of billing increment values
+- Email subject might contain some additional details
+- Static selection of header and foother
 
+
+Above things will crash the system
+
+one solution to integrate open ai as a fallback 
+
+
+- Issues in corrupt files (auto generated )... working..
+
+
+
+==================================================
