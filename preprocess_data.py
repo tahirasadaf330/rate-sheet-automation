@@ -9,6 +9,31 @@ REQUIRED_COLS = [
 
 EXCEL_EPOCH = datetime(1899, 12, 30)          # Excel’s epoch (PC versions)
 
+#________________________________ read raw ──────────────────────────────────
+
+def _read_raw_matrix(path: str, sheet=0) -> pd.DataFrame:
+    """
+    Return a raw cell grid as a DataFrame with no headers.
+    - Excel: read with openpyxl to bypass 'usedRange' quirks.
+    - CSV/TXT: read with pandas (header=None).
+    """
+    ext = os.path.splitext(path)[1].lower()
+    if ext in ('.xlsx', '.xlsm', '.xls'):
+        wb = load_workbook(path, data_only=True, read_only=False)
+        ws = wb.worksheets[sheet] if isinstance(sheet, int) else wb[sheet]
+        # Pull actual cells; openpyxl gives real grid, not usedRange
+        rows = list(ws.iter_rows(values_only=True))
+        raw = pd.DataFrame(rows)
+        # Trim fully empty padding
+        raw.dropna(how="all", inplace=True)
+        raw.dropna(axis=1, how="all", inplace=True)
+        raw.reset_index(drop=True, inplace=True)
+        return raw.astype("string")  # keep everything as string-like for header detection
+    else:
+        # CSV/TXT etc.
+        return pd.read_csv(path, header=None, dtype=str)
+
+
 # ──────────────────────────────── headers ───────────────────────────────────
 
 def detect_header_row(raw: pd.DataFrame) -> int:
@@ -229,54 +254,113 @@ def clean_billing_increment(val) -> str:
     return f"{a}/{b}"
 
 # ───────────────────────────── loader main ───────────────────────────────────
+# def load_clean_rates(path: str, output_path: str, sheet=0) -> pd.DataFrame:
+#     ext = os.path.splitext(path)[1].lower()
+#     if not os.path.exists(path):
+#         raise FileNotFoundError(f'File not found: {path}')
+
+#     # read raw with no header
+#     raw = (pd.read_csv(path, header=None, dtype=str)
+#         if ext in ('.csv', '.txt')
+#         else pd.read_excel(path, sheet_name=sheet, header=None, dtype=str))
+
+#     header_row_idx = detect_header_row(raw)
+
+#     # re-read with the detected header row
+#     df = (pd.read_csv(path, header=header_row_idx, dtype=str)
+#         if ext in ('.csv', '.txt')
+#         else pd.read_excel(path, sheet_name=sheet, header=header_row_idx, dtype=str))
+
+#     # canonicalize headers NOW (after re-read)
+#     df = _canonicalize_headers(df)
+
+#     df = trim_after_notes_and_strip_blank_above(df)
+
+#     # keep only canonical required columns
+#     df = df[REQUIRED_COLS].copy()
+
+#     # ── clean fields ────────────────────────────────────────────────────────
+#     df['Dst Code'] = df['Dst Code'].astype(str).str.strip()
+
+#     # Robust numeric parsing for Rate; keep as float, leave invalids as NaN
+#     s = df['Rate'].astype(str).str.strip()
+
+#     # Normalize common vendor formats
+#     s = (s
+#         .str.replace(r'[\$\£\€]', '', regex=True)     # currency symbols
+#         .str.replace(r'\s+', '', regex=True)          # stray spaces
+#     )
+
+#     df['Rate'] = pd.to_numeric(s, errors='coerce')
+#     df['Billing Increment'] = df['Billing Increment'].astype(str).str.strip().apply(clean_billing_increment)
+
+#     df['Effective Date'] = df['Effective Date'].apply(normalise_date_any)
+
+#     df.to_excel(output_path, index=False)
+
+# # ──────────────────────────── quick test ─────────────────────────────────────
+# if __name__ == '__main__':
+#     FILE_PATH = r'C:\Users\User\OneDrive - Hayo Telecom, Inc\Documents\Work\Rate Sheet Automation\rate-sheet-automation\test_files\Express_Teleservice_Corp__rates_to_HAYO_TELECOM_ETS__SIP_Pre_____25_08_2025.xlsx'
+#     OUTPUT_FILE_PATH = r'test_files/BICS_cleaned.xlsx'
+#     cleaned = load_clean_rates(FILE_PATH, OUTPUT_FILE_PATH, 0)
+   
+#     print('✅ Cleaned and saved.')
+
+
+
 def load_clean_rates(path: str, output_path: str, sheet=0) -> pd.DataFrame:
-    ext = os.path.splitext(path)[1].lower()
+    """
+    Robust loader:
+      1) Read raw grid (openpyxl for Excel; pandas for CSV/TXT)
+      2) Detect header row (using your detect_header_row)
+      3) Build a proper DataFrame with headers
+      4) Canonicalize headers, trim notes/footer, select required cols
+      5) Clean fields and write to Excel
+    """
     if not os.path.exists(path):
         raise FileNotFoundError(f'File not found: {path}')
 
-    # read raw with no header
-    raw = (pd.read_csv(path, header=None, dtype=str)
-        if ext in ('.csv', '.txt')
-        else pd.read_excel(path, sheet_name=sheet, header=None, dtype=str))
+    # 1) raw grid
+    raw = _read_raw_matrix(path, sheet=sheet)
 
+    # 2) detect header row in the raw grid
     header_row_idx = detect_header_row(raw)
 
-    # re-read with the detected header row
-    df = (pd.read_csv(path, header=header_row_idx, dtype=str)
-        if ext in ('.csv', '.txt')
-        else pd.read_excel(path, sheet_name=sheet, header=header_row_idx, dtype=str))
+    # 3) construct DF: header = that row; data = rows below it
+    header_values = list(raw.iloc[header_row_idx].fillna('').astype(str))
+    df = raw.iloc[header_row_idx+1:].copy()
+    df.columns = header_values
 
-    # canonicalize headers NOW (after re-read)
+    # drop columns/rows that are completely empty after slicing
+    df.dropna(how="all", inplace=True)
+    df.dropna(axis=1, how="all", inplace=True)
+    df.reset_index(drop=True, inplace=True)
+
+    # 4) canonicalize & trim
     df = _canonicalize_headers(df)
-
     df = trim_after_notes_and_strip_blank_above(df)
 
     # keep only canonical required columns
     df = df[REQUIRED_COLS].copy()
 
-    # ── clean fields ────────────────────────────────────────────────────────
+    # 5) clean fields
+    # Dst Code: keep as string, strip; drop truly empty codes
     df['Dst Code'] = df['Dst Code'].astype(str).str.strip()
+    df = df[df['Dst Code'].ne("")]
 
-    # Robust numeric parsing for Rate; keep as float, leave invalids as NaN
+    # Rate: strip symbols/spaces and coerce to float
     s = df['Rate'].astype(str).str.strip()
-
-    # Normalize common vendor formats
     s = (s
-        .str.replace(r'[\$\£\€]', '', regex=True)     # currency symbols
-        .str.replace(r'\s+', '', regex=True)          # stray spaces
-    )
-
+         .str.replace(r'[\$\£\€]', '', regex=True)
+         .str.replace(r'\s+', '', regex=True))
     df['Rate'] = pd.to_numeric(s, errors='coerce')
+
+    # Billing Increment: normalize to "x/y"
     df['Billing Increment'] = df['Billing Increment'].astype(str).str.strip().apply(clean_billing_increment)
 
+    # Effective Date: robust parse (your helper returns Timestamp or NaT)
     df['Effective Date'] = df['Effective Date'].apply(normalise_date_any)
 
+    # finally, write the cleaned sheet
     df.to_excel(output_path, index=False)
-
-# ──────────────────────────── quick test ─────────────────────────────────────
-if __name__ == '__main__':
-    FILE_PATH = r'C:\Users\User\OneDrive - Hayo Telecom, Inc\Documents\Work\Rate Sheet Automation\rate-sheet-automation\test_files\Express_Teleservice_Corp__rates_to_HAYO_TELECOM_ETS__SIP_Pre_____25_08_2025.xlsx'
-    OUTPUT_FILE_PATH = r'test_files/BICS_cleaned.xlsx'
-    cleaned = load_clean_rates(FILE_PATH, OUTPUT_FILE_PATH, 0)
-   
-    print('✅ Cleaned and saved.')
+    return df
