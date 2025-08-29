@@ -2,6 +2,7 @@ import pandas as pd, os, re, numpy as np
 from datetime import datetime
 from dateutil import parser as dparse
 from openpyxl import load_workbook
+import re, unicodedata
 
 REQUIRED_COLS = [
     'Dst Code', 'Rate', 'Effective Date', 'Billing Increment'
@@ -9,67 +10,151 @@ REQUIRED_COLS = [
 
 EXCEL_EPOCH = datetime(1899, 12, 30)          # Excel’s epoch (PC versions)
 
+DEBUG = True
+def dbg(*a, **k):
+    if DEBUG:
+        print(*a, **k)
+
+def _codepoints(s):
+    s = str(s)
+    return " ".join(f"U+{ord(ch):04X}" for ch in s)
+
+
+# ---- Header pre-cleaner: strip currency symbols/codes and other noise ----
+
+_CURRENCY_SYMBOLS_RE = r'[$£€¥₹₩₽₺₫₪₴₦₱₲₵₡₭฿₮₸₼]'
+_CURRENCY_CODES = (
+    "usd|eur|gbp|jpy|cny|rmb|cad|aud|nzd|inr|chf|sar|aed|rub|brl|mxn|zar|"
+    "sek|nok|dkk|pln|huf|try|ils|krw|idr|myr|thb|php|vnd|uah|ron|czk|ars|"
+    "clp|cop|pen|twd|hkd|sgd|ngn|kzt"
+)
+_CURRENCY_CODES_RE = re.compile(rf"(?i)\b(?:{_CURRENCY_CODES})\b")
+_CURRENCY_SYMBOLS_RE = re.compile(r"[$£€¥₹₩₽₺₫₪₴₦₱₲₵₡₭฿₮₸₼]")
+
+def _preclean_header_token(s: str) -> str:
+    """Strip currency symbols/codes and common junk from HEADER labels."""
+    s = str(s).replace("\n", " ")
+    s = _CURRENCY_SYMBOLS_RE.sub(" ", s)          # $, €, etc.
+    s = re.sub(r"\(.*?\)", " ", s)                # drop parentheticals like (USD)
+    s = _CURRENCY_CODES_RE.sub(" ", s)            # USD, EUR, etc.
+    s = re.sub(r"(?i)\bper\s*(min(?:ute)?|sec(?:ond)?)\b", " ", s)
+    s = re.sub(r"[/\\|:]+", " ", s)
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
+
+def _strip_currency_words_from_key(key: str) -> str:
+    """After _norm(), remove currency tokens that became words (e.g. rate_usd)."""
+    # kill leading/trailing or middle _usd/_eur tokens
+    key = re.sub(rf"(?:^|_)(?:{_CURRENCY_CODES})(?=_|$)", "", key, flags=re.I)
+    key = re.sub(r"_+", "_", key).strip("_")
+    return key
+
 #________________________________ read raw ──────────────────────────────────
 
+def _raw_from_ws(ws) -> pd.DataFrame:
+    ws.calculate_dimension()  # fix stale used-range
+    rows = list(ws.iter_rows(values_only=True))
+    raw = pd.DataFrame(rows)
+    raw.dropna(how="all", inplace=True)
+    raw.dropna(axis=1, how="all", inplace=True)
+    raw.reset_index(drop=True, inplace=True)
+    return raw.astype("string")
+
 def _read_raw_matrix(path: str, sheet=0) -> pd.DataFrame:
-    """
-    Return a raw cell grid as a DataFrame with no headers.
-    - Excel: read with openpyxl to bypass 'usedRange' quirks.
-    - CSV/TXT: read with pandas (header=None).
-    """
     ext = os.path.splitext(path)[1].lower()
     if ext in ('.xlsx', '.xlsm', '.xls'):
         wb = load_workbook(path, data_only=True, read_only=False)
-        ws = wb.worksheets[sheet] if isinstance(sheet, int) else wb[sheet]
-        # Pull actual cells; openpyxl gives real grid, not usedRange
-        rows = list(ws.iter_rows(values_only=True))
-        raw = pd.DataFrame(rows)
-        # Trim fully empty padding
-        raw.dropna(how="all", inplace=True)
-        raw.dropna(axis=1, how="all", inplace=True)
-        raw.reset_index(drop=True, inplace=True)
-        return raw.astype("string")  # keep everything as string-like for header detection
+
+        # try requested sheet first, then all others
+        try_order = []
+        if isinstance(sheet, int) and 0 <= sheet < len(wb.worksheets):
+            try_order.append(sheet)
+        elif isinstance(sheet, str):
+            try_order += [i for i, ws in enumerate(wb.worksheets) if ws.title == sheet]
+
+        try_order += [i for i in range(len(wb.worksheets)) if i not in try_order]
+
+        for i in try_order:
+            raw = _raw_from_ws(wb.worksheets[i])
+            try:
+                _ = detect_header_row(raw)  # will raise if not found
+                return raw  # this sheet has the headers; use it
+            except ValueError:
+                continue
+
+        raise ValueError("No sheet contains all required headers.")
     else:
-        # CSV/TXT etc.
         return pd.read_csv(path, header=None, dtype=str)
 
-
-# ──────────────────────────────── headers ───────────────────────────────────
-
+# ---- Header detection (instrumented) ----
 def detect_header_row(raw: pd.DataFrame) -> int:
     """
     Find the row index that, after normalization + alias mapping,
     contains ALL required canonical columns.
+    Prints detailed debug info so you can see what failed.
+
+    Relies on:
+      - REQUIRED_COLS: list of canonical column names
+      - _norm(s): normalizer function
+      - ALIAS_MAP: dict of normalized header -> canonical name
     """
-    # Canonical targets
     targets = set(REQUIRED_COLS)
 
+    best_count = -1
+    best_row = -1
+    best_covered = set()
+
     for idx, row in raw.iterrows():
-        # 1) normalize each cell
-        normed = [_norm(x) for x in row if pd.notna(x)]
-        # print(normed)
+        # raw cell texts on this row (skip NaN)
+        cells = [x for x in row if pd.notna(x)]
+        precleaned = [_preclean_header_token(x) for x in cells]
+        normed = [_norm(x) for x in precleaned]
+        mapped = [ALIAS_MAP.get(n) for n in normed]
 
-        if not normed:
-            continue
-        # 2) map normalized -> canonical using ALIAS_MAP (unknowns stay None)
-        mapped = {ALIAS_MAP.get(n) for n in normed if ALIAS_MAP.get(n)}
+        covered = {m for m in mapped if m}
+        missing = targets - covered
 
-        # print(mapped)
-        
-        # 3) if we covered all targets, we found the header row
-        if targets.issubset({m for m in mapped if m}):
+        # DEBUG dump
+        dbg(f"[hdr-scan] row={idx}")
+        dbg("  cells:", [repr(x) for x in cells])
+        dbg("  precleaned:", [repr(x) for x in precleaned])
+        dbg("  normed:", normed)
+        dbg("  mapped:", mapped)
+        if missing:
+            dbg("  still-missing:", sorted(missing))
+        else:
+            dbg(f"[hdr-scan] FOUND header row -> {idx}")
             return idx
+
+        # track best partial coverage to help when failing
+        if len(covered & targets) > best_count:
+            best_count = len(covered & targets)
+            best_row = idx
+            best_covered = covered & targets
+
+    # If we got here, we failed. Print the best candidate with codepoints.
+    dbg(f"[hdr-scan] best coverage: {best_count} on row {best_row} -> {sorted(best_covered)}")
+    if best_row != -1:
+        best_cells = [x for x in raw.iloc[best_row] if pd.notna(x)]
+        dbg("[hdr-scan] best row cells (repr):", [repr(x) for x in best_cells])
+        dbg("[hdr-scan] best row cells (_norm):", [_norm(x) for x in best_cells])
+        dbg("[hdr-scan] best row cells (codepoints):", [_codepoints(str(x)) for x in best_cells])
 
     raise ValueError(
         "Header not found. None of the rows contained all required columns "
         f"after normalization/aliasing. Required: {REQUIRED_COLS}"
     )
 
+# kill zero-widths and collapse all whitespace/slashes/hyphens; strip punctuation
+_ZW = r'[\u200B-\u200D\uFEFF]'
+
 def _norm(s: str) -> str:
-    s = str(s).strip().lower()
-    s = s.replace('-', ' ').replace('/', ' ')
-    s = ' '.join(s.split())            # collapse spaces
-    return s.replace(' ', '_')         # final form, e.g. "effective_date"
+    s = unicodedata.normalize('NFKC', str(s)).lower()
+    s = re.sub(_ZW, '', s)                 # remove zero-width chars
+    s = re.sub(r'[\s/\\\-]+', ' ', s)      # any whitespace, slash, hyphen -> single space
+    s = re.sub(r'[^\w ]+', '', s)          # drop punctuation like ., :, (), etc.
+    s = ' '.join(s.split())                # collapse to single spaces
+    return s.replace(' ', '_')
 
 # Map of normalized header variants -> canonical
 ALIAS_MAP = {
@@ -84,6 +169,8 @@ ALIAS_MAP = {
     'dialcode': 'Dst Code',
     'codes': 'Dst Code',
     'dial_codes': 'Dst Code',
+    'area_code': 'Dst Code',
+
 
     # Rate
     'rate': 'Rate',
@@ -98,6 +185,7 @@ ALIAS_MAP = {
     'rate_min($)': 'Rate',
     'new price': 'Rate',
     'price_peak': 'Rate',
+    'pricemin': 'Rate',
 
     # Effective Date
     'effective_date': 'Effective Date',
@@ -108,6 +196,7 @@ ALIAS_MAP = {
     'valid_from': 'Effective Date',
     'date': 'Effective Date',
     'effectivedate': 'Effective Date',
+
 
     # Billing Increment
     'billing_increment': 'Billing Increment',
@@ -121,30 +210,44 @@ ALIAS_MAP = {
 
 def _canonicalize_headers(df: pd.DataFrame) -> pd.DataFrame:
     original = list(df.columns)
-    mapped = {}
 
-    for c in df.columns:
-        key = _norm(c)
-        if key in ALIAS_MAP:
-            mapped[c] = ALIAS_MAP[key]
-        else:
-            mapped[c] = c  # keep unknowns
-    
+    # 1) Preclean labels (kill $, €, USD, etc.)
+    preclean_map = {c: _preclean_header_token(c) for c in original}
+    # 2) Normalize
+    norm_map = {c: _norm(preclean_map[c]) for c in original}
+    # 3) Strip currency words that survived normalization (e.g., rate_usd -> rate)
+    key_map = {c: _strip_currency_words_from_key(norm_map[c]) for c in original}
+    # 4) Alias lookup on the final key
+    alias_hit = {c: ALIAS_MAP.get(key_map[c]) for c in original}
+
+    # DEBUG: show mapping pipeline
+    dbg("[canon] original -> preclean -> norm -> key_strip -> alias:")
+    for c in original:
+        dbg(f"  {repr(c)}  ->  {repr(preclean_map[c])}  ->  {norm_map[c]}  ->  {key_map[c]}  ->  {alias_hit[c]}")
+        if not alias_hit[c]:
+            dbg("    codepoints(original):", _codepoints(c))
+
+    # If alias matches, use canonical; otherwise keep the cleaned label
+    mapped = {c: (alias_hit[c] if alias_hit[c] else preclean_map[c]) for c in original}
     df = df.rename(columns=mapped)
 
     # Verify required columns exist (in canonical names)
     missing = [c for c in REQUIRED_COLS if c not in df.columns]
     if missing:
-        # Helpful error with what we saw and our normalized forms
-        seen_norm = {col: _norm(col) for col in original}
+        dbg("[canon] df.columns:", list(df.columns))
+        dbg("[canon] missing required:", missing)
+        dbg("[canon] precleaned originals:", preclean_map)
+        dbg("[canon] normalized originals:", norm_map)
+        dbg("[canon] stripped keys:", key_map)
         raise ValueError(
             "Missing required columns: "
             f"{missing}. Found headers: {original}. "
-            f"Normalized: {seen_norm}. "
-            "Add more variants to ALIAS_MAP if needed."
+            f"Precleaned: {preclean_map}. "
+            f"Normalized: {norm_map}. "
+            f"Stripped keys: {key_map}. "
+            "Add more variants to ALIAS_MAP or harden _norm/_preclean_header_token."
         )
     return df
-
 
 # ──────────────────────────────── footer ─────────────────────────────────
 
@@ -233,15 +336,6 @@ def normalise_date_any(val) -> pd.Timestamp:
 
     return pd.NaT
 
-# def clean_billing_increment(val: str) -> str:
-#     if pd.isna(val):
-#         return ''
-#     parts = [p for p in str(val).split('/') if p.strip().isdigit()]
-#     # If format like 0/1/1, drop leading zero and keep last two numbers
-#     if len(parts) >= 2:
-#         return f"{int(parts[-2])}/{int(parts[-1])}"
-#     return ''
-
 def clean_billing_increment(val) -> str:
     """Normalize billing increment like 0/1/1, 0-60-60, '0 – 1 – 1', etc. → '1/1' or '60/60'.
        Takes the LAST TWO numeric tokens found. Returns '' if fewer than two numbers."""
@@ -253,62 +347,7 @@ def clean_billing_increment(val) -> str:
     a, b = int(nums[-2]), int(nums[-1])   # int() also strips leading zeros
     return f"{a}/{b}"
 
-# ───────────────────────────── loader main ───────────────────────────────────
-# def load_clean_rates(path: str, output_path: str, sheet=0) -> pd.DataFrame:
-#     ext = os.path.splitext(path)[1].lower()
-#     if not os.path.exists(path):
-#         raise FileNotFoundError(f'File not found: {path}')
-
-#     # read raw with no header
-#     raw = (pd.read_csv(path, header=None, dtype=str)
-#         if ext in ('.csv', '.txt')
-#         else pd.read_excel(path, sheet_name=sheet, header=None, dtype=str))
-
-#     header_row_idx = detect_header_row(raw)
-
-#     # re-read with the detected header row
-#     df = (pd.read_csv(path, header=header_row_idx, dtype=str)
-#         if ext in ('.csv', '.txt')
-#         else pd.read_excel(path, sheet_name=sheet, header=header_row_idx, dtype=str))
-
-#     # canonicalize headers NOW (after re-read)
-#     df = _canonicalize_headers(df)
-
-#     df = trim_after_notes_and_strip_blank_above(df)
-
-#     # keep only canonical required columns
-#     df = df[REQUIRED_COLS].copy()
-
-#     # ── clean fields ────────────────────────────────────────────────────────
-#     df['Dst Code'] = df['Dst Code'].astype(str).str.strip()
-
-#     # Robust numeric parsing for Rate; keep as float, leave invalids as NaN
-#     s = df['Rate'].astype(str).str.strip()
-
-#     # Normalize common vendor formats
-#     s = (s
-#         .str.replace(r'[\$\£\€]', '', regex=True)     # currency symbols
-#         .str.replace(r'\s+', '', regex=True)          # stray spaces
-#     )
-
-#     df['Rate'] = pd.to_numeric(s, errors='coerce')
-#     df['Billing Increment'] = df['Billing Increment'].astype(str).str.strip().apply(clean_billing_increment)
-
-#     df['Effective Date'] = df['Effective Date'].apply(normalise_date_any)
-
-#     df.to_excel(output_path, index=False)
-
-# # ──────────────────────────── quick test ─────────────────────────────────────
-# if __name__ == '__main__':
-#     FILE_PATH = r'C:\Users\User\OneDrive - Hayo Telecom, Inc\Documents\Work\Rate Sheet Automation\rate-sheet-automation\test_files\Express_Teleservice_Corp__rates_to_HAYO_TELECOM_ETS__SIP_Pre_____25_08_2025.xlsx'
-#     OUTPUT_FILE_PATH = r'test_files/BICS_cleaned.xlsx'
-#     cleaned = load_clean_rates(FILE_PATH, OUTPUT_FILE_PATH, 0)
-   
-#     print('✅ Cleaned and saved.')
-
-
-
-def load_clean_rates(path: str, output_path: str, sheet=0) -> pd.DataFrame:
+def load_clean_rates(path: str, output_path: str, sheet=None) -> pd.DataFrame:
     """
     Robust loader:
       1) Read raw grid (openpyxl for Excel; pandas for CSV/TXT)
@@ -364,3 +403,11 @@ def load_clean_rates(path: str, output_path: str, sheet=0) -> pd.DataFrame:
     # finally, write the cleaned sheet
     df.to_excel(output_path, index=False)
     return df
+
+# ──────────────────────────── quick test ─────────────────────────────────────
+if __name__ == '__main__':
+    FILE_PATH = r'C:\Users\User\OneDrive - Hayo Telecom, Inc\Documents\Work\Rate Sheet Automation\rate-sheet-automation\test_files\BICS FC Pricelist (25 Aug 2025) USA Hayo Telecom.xlsx'
+    OUTPUT_FILE_PATH = r'test_files/NHV_cleaned.xlsx'
+    cleaned = load_clean_rates(FILE_PATH, OUTPUT_FILE_PATH, 0)
+   
+    print('✅ Cleaned and saved.')

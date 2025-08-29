@@ -26,7 +26,7 @@ import requests
 from msal import ConfidentialClientApplication
 from dotenv import load_dotenv
 from urllib.parse import quote
-from open_ai import validate_subject_openai
+# from open_ai import validate_subject_openai
 
 import time
 

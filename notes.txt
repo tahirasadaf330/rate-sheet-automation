@@ -133,8 +133,6 @@ from: rates@mapletele.com
 
 ==================================================
 
-
-
 - Column names with spelling mistakes
 - Different ways of billing increment values
 - Email subject might contain some additional details
@@ -146,8 +144,47 @@ Above things will crash the system
 one solution to integrate open ai as a fallback 
 
 
-- Issues in corrupt files (auto generated )... working..
+- Issues in corrupt files (auto generated )... done
+- Rate $ USD we are trimining any currency symbol etc...
+- In NHV file there are multiple dst codes?
+- Handling multiple sheets like the one in BICS.
+- is dial code is area code?
+- again different col names probl Billing increment Start Date
+- col name confusion start date in bics
+
+Also there are different col names like price/min in bics
+
+the code is current dynamic to look into multiple sheets column 
 
 
+the code does handles multiple sheets within a file what it does is open each sheet and see where all the cols exist then clean that 
+it does this pretty well.
+
+look the hard part is data cleaning comprison is just a walk in the park
+
+talk on subjects validation tell the email subject validation through open ai module is done.
+...
+
+first let the suffyan show the demo on his machine of the app.
 
 ==================================================
+
+
+subjets from original email:
+
+Premium price-list from Express Teleservice Corp. to HAYO TELECOM_ETS SIP_Pre
+New Voice Rates for Hayo Telecom Inc. Platinum [TID:4383686]
+Hubbing Price List SEP 2025 - PREMIUM
+01/09/2025 Orange Hubbing Essential
+BICS: FC Pricelist (25 Aug 2025): USA Hayo Telecom : Decrease 01 Sep 2025 - Increase 01 Sep 2025 : Full A-Z
+
+
+
+=============
+
+DB_CONNECTION=pgsql
+DB_HOST=10.10.8.242
+DB_PORT=5432
+DB_DATABASE=Voice-Rates-Automation
+DB_USERNAME=uzair
+DB_PASSWORD=King@123*

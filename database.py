@@ -116,4 +116,4 @@ def bulk_insert_rate_upload_details(
         conn.commit()
     return total
 
-# insert_authorized_senders(VERIFIED_SENDERS)
+insert_authorized_senders(VERIFIED_SENDERS)
