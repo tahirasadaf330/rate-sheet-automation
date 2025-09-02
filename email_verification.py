@@ -47,6 +47,9 @@ SCOPES = ["https://graph.microsoft.com/.default"]
 
 VERIFIED = {e.lower().strip() for e in VERIFIED_SENDERS}
 
+# Where to store subjects that fail validation (next to this script)
+FAILED_SUBJECTS_PATH = Path(__file__).with_name("failed_subjects.json")
+
 # ------------------------- Subject Normalization & Parsing -------------------------
 
 def _normalize_subject(s: Optional[str]) -> Optional[str]:
@@ -480,6 +483,46 @@ def write_metadata(save_dir: str, meta: Dict[str, object]) -> None:
     except Exception as e:
         print(f"  (warn) failed to write metadata for {save_dir}: {e}", file=sys.stderr)
 
+# ___________________ Failed Emails subjects handeling ___________________
+def _read_json_dict(path: Path) -> Dict[str, object]:
+    try:
+        if path.exists():
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, dict):
+                    return data
+    except Exception as e:
+        print(f"(warn) could not read {path}: {e}", file=sys.stderr)
+    return {}
+
+def _atomic_write_json(path: Path, data: Dict[str, object]) -> None:
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, path)
+
+def log_failed_subject(sender_email: str, raw_subject: str) -> None:
+    """Append the failed subject under the sender key. Values are lists to avoid overwrites."""
+    if DRY_RUN:
+        dbg(f"DRY_RUN: would log failed subject for {sender_email!r}: {raw_subject!r}")
+        return
+    data = _read_json_dict(FAILED_SUBJECTS_PATH)
+    current = data.get(sender_email)
+    if current is None:
+        data[sender_email] = [raw_subject]
+    elif isinstance(current, list):
+        if raw_subject not in current:
+            current.append(raw_subject)
+    else:
+        # normalize pre-existing non-list value
+        if current != raw_subject:
+            data[sender_email] = [current, raw_subject]
+    try:
+        _atomic_write_json(FAILED_SUBJECTS_PATH, data)
+    except Exception as e:
+        print(f"(warn) failed to update {FAILED_SUBJECTS_PATH}: {e}", file=sys.stderr)
+#_________________________________
+
 def process_inbox(session: requests.Session, user_email: str, after: Optional[str], before: Optional[str],
                   page_size: int, allowed_exts: Set[str], attachments_base: str, unread_only: bool):
     after_iso, before_iso = iso_range(after, before)
@@ -555,8 +598,17 @@ def process_inbox(session: requests.Session, user_email: str, after: Optional[st
             #         print(f"  -> skip: LLM fallback crashed: {e}")
             #         parsed = None
 
+            # if not parsed:
+            #     print(f"  -> skip: subject does not match required fields: {subject!r}")
+            #     skipped_subject += 1
+            #     continue
+         
             if not parsed:
                 print(f"  -> skip: subject does not match required fields: {subject!r}")
+                try:
+                    log_failed_subject(sender, subject)
+                except Exception as e:
+                    print(f"  (warn) failed to log failed subject: {e}", file=sys.stderr)
                 skipped_subject += 1
                 continue
 

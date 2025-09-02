@@ -29,6 +29,7 @@ from typing import Dict, List, Tuple, Optional
 import pandas as pd
 import requests
 from dotenv import load_dotenv
+from json import JSONDecodeError
 
 load_dotenv()
 
@@ -78,10 +79,25 @@ def extract_company_keyword(query: str) -> str:
 # API helpers
 # -------------------------------------------------------------------
 
+# def _post_json(api_url: str, payload: Dict, timeout: int = 500) -> Dict:
+#     resp = _session.post(api_url, headers=DEFAULT_HEADERS, json=payload, timeout=timeout)
+#     resp.raise_for_status()
+#     return resp.json()
+
 def _post_json(api_url: str, payload: Dict, timeout: int = 500) -> Dict:
     resp = _session.post(api_url, headers=DEFAULT_HEADERS, json=payload, timeout=timeout)
     resp.raise_for_status()
-    return resp.json()
+    ctype = resp.headers.get("Content-Type", "")
+    try:
+        return resp.json()
+    except JSONDecodeError as e:
+        head = resp.text[:1000]
+        tail = resp.text[-500:] if len(resp.text) > 1500 else ""
+        raise RuntimeError(
+            f"JSON decode failed at pos {e.pos}: {e.msg}. "
+            f"status={resp.status_code} content_type={ctype}. "
+            f"body_start={head!r} body_end={tail!r}"
+        )
 
 def fetch_all_tables(api_url: Optional[str] = None, api_key: Optional[str] = None, page_size: int = 500) -> List[Dict]:
     """Fetch all rate tables via pagination."""
@@ -111,6 +127,7 @@ def fetch_all_tables(api_url: Optional[str] = None, api_key: Optional[str] = Non
 
 def find_best_term_table(
     target_query: str,
+    subject: str,
     api_url: Optional[str] = None,
     api_key: Optional[str] = None,
     top_k: int = 5,
@@ -138,7 +155,7 @@ def find_best_term_table(
         return f"No TERM* tables found containing company '{company_kw}'.", "", ""
         # raise LookupError(f"No TERM* tables found containing company '{company_kw}'.")
 
-    scored = [(fuzzy_score(t.get("name", ""), target_query), t) for t in candidates]
+    scored = [(fuzzy_score(t.get("name", ""), subject), t) for t in candidates]
     scored.sort(key=lambda x: x[0], reverse=True)
     best_score, best_table = scored[0]
 
@@ -248,6 +265,7 @@ def save_rates_to_excel(df: pd.DataFrame, output_path: str) -> str:
 def export_rates_by_query(
     target_query: str,
     output_path: str,
+    subject: str,
     *,
     api_url: Optional[str] = None,
     api_key: Optional[str] = None,
@@ -263,7 +281,7 @@ def export_rates_by_query(
     Returns a dict with summary info.
     """
     table_id, best_table, top_scored = find_best_term_table(
-        target_query=target_query, api_url=api_url, api_key=api_key
+        target_query=target_query, api_url=api_url, api_key=api_key, subject=subject
     )
 
     if best_table == "" and top_scored == "":

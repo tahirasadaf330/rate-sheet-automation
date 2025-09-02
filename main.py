@@ -29,7 +29,7 @@ import pandas as pd
 from typing import Any 
 #_____________ Email Verification Script_____________
 
-after = "2025-08-29"              # only include emails on/after this date (YYYY-MM-DD) or None
+after = "2025-09-1"              # only include emails on/after this date (YYYY-MM-DD) or None
 before = None           # only include emails on/before this date (YYYY-MM-DD) or None
 unread_only = False    
 ATTEMPTS = 2
@@ -67,7 +67,8 @@ def process_all_directories(attachments_base="attachments"):
 
         # Extract subject
         company = meta.get("company")
-        if not company:
+        subject = meta.get("subject")
+        if not company and subject:
             print(f"[WARN] No company found in {meta_file}, skipping...")
             continue
 
@@ -90,7 +91,7 @@ def process_all_directories(attachments_base="attachments"):
 
         info = None
         try:
-            info = export_rates_by_query(company, output_path)
+            info = export_rates_by_query(company, output_path, subject)
             print(info)
 
             if isinstance(info, str):

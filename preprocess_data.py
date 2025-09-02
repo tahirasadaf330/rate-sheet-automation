@@ -63,7 +63,7 @@ def _raw_from_ws(ws) -> pd.DataFrame:
 def _read_raw_matrix(path: str, sheet=0) -> pd.DataFrame:
     ext = os.path.splitext(path)[1].lower()
     if ext in ('.xlsx', '.xlsm', '.xls'):
-        wb = load_workbook(path, data_only=True, read_only=False)
+        wb = load_workbook(path, data_only=True, read_only=True)
 
         # try requested sheet first, then all others
         try_order = []
@@ -206,6 +206,7 @@ ALIAS_MAP = {
     'billing': 'Billing Increment',
     'billingincrement': 'Billing Increment',
     'rounding_rules': 'Billing Increment',
+    'rounding': 'Billing Increment',
 }
 
 def _canonicalize_headers(df: pd.DataFrame) -> pd.DataFrame:
@@ -406,8 +407,8 @@ def load_clean_rates(path: str, output_path: str, sheet=None) -> pd.DataFrame:
 
 # ──────────────────────────── quick test ─────────────────────────────────────
 if __name__ == '__main__':
-    FILE_PATH = r'C:\Users\User\OneDrive - Hayo Telecom, Inc\Documents\Work\Rate Sheet Automation\rate-sheet-automation\test_files\BICS FC Pricelist (25 Aug 2025) USA Hayo Telecom.xlsx'
-    OUTPUT_FILE_PATH = r'test_files/NHV_cleaned.xlsx'
+    FILE_PATH = r'C:\Users\User\OneDrive - Hayo Telecom, Inc\Documents\Work\Rate Sheet Automation\rate-sheet-automation\attachments\rates_at_tele-geeks.net_20250901_095901\Hayo_Full_CC_-_Rate_Notification.xlsx'
+    OUTPUT_FILE_PATH = r'attachments/Hayo Telecom_cleaned.xlsx'
     cleaned = load_clean_rates(FILE_PATH, OUTPUT_FILE_PATH, 0)
    
     print('✅ Cleaned and saved.')
