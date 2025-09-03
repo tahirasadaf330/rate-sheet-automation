@@ -40,7 +40,21 @@ DEFAULT_API_URL = os.getenv("JERASOFT_API_URL", "http://billing.voipsystem.org:3
 DEFAULT_API_KEY = os.getenv("JERA_SOFT_API_KEY")
 DEFAULT_HEADERS = {"Content-Type": "application/json", "Accept": "application/json"}
 
+# _session = requests.Session()
+
+# --- robust session with retries for transient upstream issues ---
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+
 _session = requests.Session()
+_retry = Retry(
+    total=4,
+    backoff_factor=0.4,
+    status_forcelist=[502, 503, 504],
+    allowed_methods=["POST"],
+)
+_session.mount("http://", HTTPAdapter(max_retries=_retry))
+_session.mount("https://", HTTPAdapter(max_retries=_retry))
 
 #__________________________Enforce prefix_____________________________
 # --- prefix utilities (add near your string utils) ---
@@ -99,14 +113,20 @@ def extract_company_keyword(query: str) -> str:
     m = re.search(r"[A-Za-z0-9._-]+", query or "")
     return (m.group(0).lower() if m else "").strip()
 
-# -------------------------------------------------------------------
-# API helpers
-# -------------------------------------------------------------------
-
 # def _post_json(api_url: str, payload: Dict, timeout: int = 500) -> Dict:
 #     resp = _session.post(api_url, headers=DEFAULT_HEADERS, json=payload, timeout=timeout)
 #     resp.raise_for_status()
-#     return resp.json()
+#     ctype = resp.headers.get("Content-Type", "")
+#     try:
+#         return resp.json()
+#     except JSONDecodeError as e:
+#         head = resp.text[:1000]
+#         tail = resp.text[-500:] if len(resp.text) > 1500 else ""
+#         raise RuntimeError(
+#             f"JSON decode failed at pos {e.pos}: {e.msg}. "
+#             f"status={resp.status_code} content_type={ctype}. "
+#             f"body_start={head!r} body_end={tail!r}"
+#         )
 
 def _post_json(api_url: str, payload: Dict, timeout: int = 500) -> Dict:
     resp = _session.post(api_url, headers=DEFAULT_HEADERS, json=payload, timeout=timeout)
@@ -115,13 +135,14 @@ def _post_json(api_url: str, payload: Dict, timeout: int = 500) -> Dict:
     try:
         return resp.json()
     except JSONDecodeError as e:
-        head = resp.text[:1000]
-        tail = resp.text[-500:] if len(resp.text) > 1500 else ""
+        body = resp.text or ""
+        clen = resp.headers.get("Content-Length")
         raise RuntimeError(
             f"JSON decode failed at pos {e.pos}: {e.msg}. "
-            f"status={resp.status_code} content_type={ctype}. "
-            f"body_start={head!r} body_end={tail!r}"
+            f"status={resp.status_code} content_type={ctype} content_length={clen} "
+            f"body_len={len(body)} body_start={body[:1000]!r} body_end={body[-500:]!r}"
         )
+
 
 def fetch_all_tables(api_url: Optional[str] = None, api_key: Optional[str] = None, page_size: int = 500) -> List[Dict]:
     """Fetch all rate tables via pagination."""
@@ -148,49 +169,6 @@ def fetch_all_tables(api_url: Optional[str] = None, api_key: Optional[str] = Non
         all_tables.extend(page)
         offset += page_size
     return all_tables
-
-# def find_best_term_table(
-#     target_query: str,
-#     subject: str,
-#     prefix_code: Optional[str] = None, 
-#     api_url: Optional[str] = None,
-#     api_key: Optional[str] = None,
-#     top_k: int = 5,
-# ) -> Tuple[int, Dict, List[Tuple[float, Dict]]]:
-#     """
-#     Find the best matching TERM* table for the provided query.
-
-#     Returns: (best_table_id, best_table_json, scored_candidates)
-#     where scored_candidates is a list of (score, table_json), sorted desc.
-#     """
-#     if not target_query:
-#         raise ValueError("target_query must be non-empty")
-
-#     company_kw = extract_company_keyword(target_query)
-#     print("Using company keyword:", repr(company_kw))
-#     if not company_kw:
-#         raise ValueError("Could not extract a company keyword from target_query.")
-
-#     tables = fetch_all_tables(api_url=api_url, api_key=api_key)
-#     candidates = [
-#         t for t in tables
-#         if name_starts_with_term(t.get("name", "")) and name_contains_company(t.get("name", ""), company_kw)
-#     ]
-#     if not candidates:
-#         return f"No TERM* tables found containing company '{company_kw}'.", "", ""
-#         # raise LookupError(f"No TERM* tables found containing company '{company_kw}'.")
-
-#     scored = [(fuzzy_score(t.get("name", ""), subject), t) for t in candidates]
-#     scored.sort(key=lambda x: x[0], reverse=True)
-#     best_score, best_table = scored[0]
-
-#     best_id = best_table.get("id")
-#     print(f"Best match: {best_table.get('name')} (score {best_score:.3f}, id {best_id})")
-#     if best_id is None:
-#         raise KeyError("Best table did not include an 'id' field")
-
-#     # Truncate scored list to top_k for display/return brevity
-#     return int(best_id), best_table, scored[:top_k]
 
 def find_best_term_table(
     target_query: str,
@@ -245,17 +223,100 @@ def find_best_term_table(
     return int(best_id), best_table, scored[:top_k]
 
 
+# def fetch_active_current_future_rates(
+#     table_id: int,
+#     api_url: Optional[str] = None,
+#     api_key: Optional[str] = None,
+#     when_utc: Optional[datetime] = None,
+#     page_limit: int = 5000,  # server may cap this; we’ll still paginate safely
+# ) -> pd.DataFrame:
+#     """
+#     Fetch active current & future rates into a tidy DataFrame.
+#     - Uses stable server-side ordering for consistent pagination.
+#     - V1-style pagination: increment by len(result); stop only on empty page.
+#     """
+#     api_url = api_url or DEFAULT_API_URL
+#     api_key = api_key or DEFAULT_API_KEY
+#     if not api_key:
+#         raise ValueError("Missing API key (env JERA_SOFT_API_KEY or pass api_key).")
+
+#     when_utc = when_utc or datetime.utcnow()
+
+#     offset = 0
+#     all_records: List[Dict] = []
+
+#     base_params = {
+#         "AUTH": api_key,
+#         "rate_tables_id": table_id,
+#         "state": "current_future",
+#         "status": "active",
+#         "__tz": "UTC",
+#         "dt": when_utc.strftime("%Y-%m-%d %H:%M:%S"),
+#         "limit": page_limit,
+#         "order": ["+code", "-effective_from"],  # stable ordering for paging parity
+#     }
+
+#     while True:
+#         params = dict(base_params, offset=offset)
+
+#         payload = {
+#             "jsonrpc": "2.0",
+#             "id": 1,
+#             "method": "rates.search",
+#             "params": params,
+#         }
+
+#         data = _post_json(api_url, payload)
+#         result = data.get("result")
+#         if not isinstance(result, list):
+#             raise RuntimeError(f"Unexpected response or error: {str(data)[:400]}")
+
+#         if not result:
+#             break
+
+#         all_records.extend(result)
+#         # V1-style: move offset by what we actually got; don't assume server honors 'limit'
+#         offset += len(result)
+
+#     if not all_records:
+#         return pd.DataFrame(columns=[
+#             "Dst Code", "Dst Code Name", "Rate", "Effective Date", "Billing Increment"
+#         ])
+
+#     df = pd.DataFrame(all_records)
+
+#     # Billing Increment (robust to missing)
+#     min_vol = df.get("min_volume")
+#     pay_int = df.get("pay_interval")
+#     min_vol_str = min_vol.where(min_vol.notna(), "").astype(str) if min_vol is not None else ""
+#     pay_int_str = pay_int.where(pay_int.notna(), "").astype(str) if pay_int is not None else ""
+#     df["Billing Increment"] = (
+#         (min_vol_str if isinstance(min_vol_str, pd.Series) else "") + "/" +
+#         (pay_int_str if isinstance(pay_int_str, pd.Series) else "")
+#     ).str.strip("/")
+
+#     keep = ["code", "code_name", "value", "effective_from", "Billing Increment"]
+#     keep_existing = [c for c in keep if c in df.columns]
+#     df_selected = df[keep_existing].rename(columns={
+#         "code": "Dst Code",
+#         "code_name": "Dst Code Name",
+#         "value": "Rate",
+#         "effective_from": "Effective Date",
+#     })
+
+#     return df_selected.reset_index(drop=True)
+
 def fetch_active_current_future_rates(
     table_id: int,
     api_url: Optional[str] = None,
     api_key: Optional[str] = None,
     when_utc: Optional[datetime] = None,
-    page_limit: int = 5000,  # server may cap this; we’ll still paginate safely
+    page_limit: int = 500,  # start conservative; adaptive logic will adjust
 ) -> pd.DataFrame:
     """
-    Fetch active current & future rates into a tidy DataFrame.
-    - Uses stable server-side ordering for consistent pagination.
-    - V1-style pagination: increment by len(result); stop only on empty page.
+    Fetch active current & future rates with adaptive pagination.
+    If the server returns truncated JSON with HTTP 200, we retry the same page,
+    and if needed, halve the page size until it parses.
     """
     api_url = api_url or DEFAULT_API_URL
     api_key = api_key or DEFAULT_API_KEY
@@ -267,6 +328,10 @@ def fetch_active_current_future_rates(
     offset = 0
     all_records: List[Dict] = []
 
+    # never go below this; below 100 is just suffering
+    MIN_LIMIT = 100
+    current_limit = max(MIN_LIMIT, int(page_limit))
+
     base_params = {
         "AUTH": api_key,
         "rate_tables_id": table_id,
@@ -274,31 +339,44 @@ def fetch_active_current_future_rates(
         "status": "active",
         "__tz": "UTC",
         "dt": when_utc.strftime("%Y-%m-%d %H:%M:%S"),
-        "limit": page_limit,
-        "order": ["+code", "-effective_from"],  # stable ordering for paging parity
+        "order": ["+code", "-effective_from"],
     }
 
     while True:
-        params = dict(base_params, offset=offset)
+        params = dict(base_params, limit=current_limit, offset=offset)
+        payload = {"jsonrpc": "2.0", "id": 1, "method": "rates.search", "params": params}
 
-        payload = {
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "rates.search",
-            "params": params,
-        }
+        # retry decode at this offset/limit before shrinking
+        attempts = 0
+        while True:
+            attempts += 1
+            try:
+                data = _post_json(api_url, payload, timeout=500)
+                break  # parsed ok
+            except RuntimeError as e:
+                # Our _post_json wraps JSONDecodeError in RuntimeError with a clear message
+                if "JSON decode failed" in str(e):
+                    if attempts < 2:
+                        # try once more at the same limit, could be a hiccup
+                        continue
+                    if current_limit > MIN_LIMIT:
+                        # shrink page and retry same offset
+                        current_limit = max(MIN_LIMIT, current_limit // 2)
+                        attempts = 0
+                        continue
+                # not a truncation case or can't shrink further — bubble up
+                raise
 
-        data = _post_json(api_url, payload)
         result = data.get("result")
         if not isinstance(result, list):
             raise RuntimeError(f"Unexpected response or error: {str(data)[:400]}")
 
         if not result:
-            break
+            break  # all done
 
         all_records.extend(result)
-        # V1-style: move offset by what we actually got; don't assume server honors 'limit'
         offset += len(result)
+        # keep current_limit as adapted; if the server handled it, we keep using it
 
     if not all_records:
         return pd.DataFrame(columns=[
@@ -307,7 +385,6 @@ def fetch_active_current_future_rates(
 
     df = pd.DataFrame(all_records)
 
-    # Billing Increment (robust to missing)
     min_vol = df.get("min_volume")
     pay_int = df.get("pay_interval")
     min_vol_str = min_vol.where(min_vol.notna(), "").astype(str) if min_vol is not None else ""
@@ -327,6 +404,7 @@ def fetch_active_current_future_rates(
     })
 
     return df_selected.reset_index(drop=True)
+
 
 def save_rates_to_excel(df: pd.DataFrame, output_path: str) -> str:
     """Save DataFrame to Excel, ensuring parent folder exists. Returns absolute path."""
