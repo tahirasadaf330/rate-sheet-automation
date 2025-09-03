@@ -664,6 +664,7 @@ def process_inbox(session: requests.Session, user_email: str, after: Optional[st
                 "subject": subject,
                 "sender": sender,
                 "company": parsed.get("company"),
+                "prefix": parsed.get("prefix"),
                 "date_utc": date_only,
                 "time_utc": time_only,
                 "directory": os.path.abspath(save_dir),

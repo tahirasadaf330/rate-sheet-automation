@@ -42,6 +42,30 @@ DEFAULT_HEADERS = {"Content-Type": "application/json", "Accept": "application/js
 
 _session = requests.Session()
 
+#__________________________Enforce prefix_____________________________
+# --- prefix utilities (add near your string utils) ---
+_prefix_in_name_pat = re.compile(r'(?:prefix|prfx)[:\s-]*(\d+)\b', re.I)
+
+def normalize_prefix(prefix) -> Optional[str]:
+    if prefix is None:
+        return None
+    try:
+        return str(int(str(prefix).strip()))
+    except Exception:
+        return None
+
+def table_prefix_from_name(name: str) -> Optional[str]:
+    """Extract numeric prefix from a table name like '... PREFIX:33' or 'PRFX-33'."""
+    m = _prefix_in_name_pat.search(name or "")
+    return str(int(m.group(1))) if m else None
+
+def table_has_prefix(name: str, prefix_code: str) -> bool:
+    """True if table name contains the exact prefix number."""
+    tp = table_prefix_from_name(name)
+    return tp == normalize_prefix(prefix_code)
+
+#_____________________________________________________________________________________
+
 # -------------------------------------------------------------------
 # String utils
 # -------------------------------------------------------------------
@@ -125,24 +149,62 @@ def fetch_all_tables(api_url: Optional[str] = None, api_key: Optional[str] = Non
         offset += page_size
     return all_tables
 
+# def find_best_term_table(
+#     target_query: str,
+#     subject: str,
+#     prefix_code: Optional[str] = None, 
+#     api_url: Optional[str] = None,
+#     api_key: Optional[str] = None,
+#     top_k: int = 5,
+# ) -> Tuple[int, Dict, List[Tuple[float, Dict]]]:
+#     """
+#     Find the best matching TERM* table for the provided query.
+
+#     Returns: (best_table_id, best_table_json, scored_candidates)
+#     where scored_candidates is a list of (score, table_json), sorted desc.
+#     """
+#     if not target_query:
+#         raise ValueError("target_query must be non-empty")
+
+#     company_kw = extract_company_keyword(target_query)
+#     print("Using company keyword:", repr(company_kw))
+#     if not company_kw:
+#         raise ValueError("Could not extract a company keyword from target_query.")
+
+#     tables = fetch_all_tables(api_url=api_url, api_key=api_key)
+#     candidates = [
+#         t for t in tables
+#         if name_starts_with_term(t.get("name", "")) and name_contains_company(t.get("name", ""), company_kw)
+#     ]
+#     if not candidates:
+#         return f"No TERM* tables found containing company '{company_kw}'.", "", ""
+#         # raise LookupError(f"No TERM* tables found containing company '{company_kw}'.")
+
+#     scored = [(fuzzy_score(t.get("name", ""), subject), t) for t in candidates]
+#     scored.sort(key=lambda x: x[0], reverse=True)
+#     best_score, best_table = scored[0]
+
+#     best_id = best_table.get("id")
+#     print(f"Best match: {best_table.get('name')} (score {best_score:.3f}, id {best_id})")
+#     if best_id is None:
+#         raise KeyError("Best table did not include an 'id' field")
+
+#     # Truncate scored list to top_k for display/return brevity
+#     return int(best_id), best_table, scored[:top_k]
+
 def find_best_term_table(
     target_query: str,
     subject: str,
     api_url: Optional[str] = None,
     api_key: Optional[str] = None,
     top_k: int = 5,
+    prefix_code: Optional[str] = None,   # <--- NEW
 ) -> Tuple[int, Dict, List[Tuple[float, Dict]]]:
-    """
-    Find the best matching TERM* table for the provided query.
 
-    Returns: (best_table_id, best_table_json, scored_candidates)
-    where scored_candidates is a list of (score, table_json), sorted desc.
-    """
     if not target_query:
         raise ValueError("target_query must be non-empty")
 
     company_kw = extract_company_keyword(target_query)
-    print("Using company keyword:", repr(company_kw))
     if not company_kw:
         raise ValueError("Could not extract a company keyword from target_query.")
 
@@ -153,19 +215,35 @@ def find_best_term_table(
     ]
     if not candidates:
         return f"No TERM* tables found containing company '{company_kw}'.", "", ""
-        # raise LookupError(f"No TERM* tables found containing company '{company_kw}'.")
 
-    scored = [(fuzzy_score(t.get("name", ""), subject), t) for t in candidates]
+    # Enforce explicit prefix if provided
+    norm_pref = normalize_prefix(prefix_code)
+    if norm_pref:
+        exact_prefix = [t for t in candidates if table_has_prefix(t.get("name", ""), norm_pref)]
+        if not exact_prefix:
+            return (f"No TERM* tables found for company '{company_kw}' with PREFIX:{norm_pref}.",
+                    "", "")
+        candidates = exact_prefix
+
+    # Score, with small tie-break boost for explicit prefix match (in case of duplicates)
+    scored: List[Tuple[float, Dict]] = []
+    for t in candidates:
+        name = t.get("name", "")
+        score = fuzzy_score(name, subject)
+        if norm_pref:
+            tp = table_prefix_from_name(name)
+            if tp == norm_pref:
+                score += 0.25  # gentle nudge for deterministic ordering
+        scored.append((score, t))
+
     scored.sort(key=lambda x: x[0], reverse=True)
     best_score, best_table = scored[0]
-
     best_id = best_table.get("id")
-    print(f"Best match: {best_table.get('name')} (score {best_score:.3f}, id {best_id})")
     if best_id is None:
         raise KeyError("Best table did not include an 'id' field")
 
-    # Truncate scored list to top_k for display/return brevity
     return int(best_id), best_table, scored[:top_k]
+
 
 def fetch_active_current_future_rates(
     table_id: int,
@@ -266,6 +344,7 @@ def export_rates_by_query(
     target_query: str,
     output_path: str,
     subject: str,
+    prefix_code: Optional[str] = None,
     *,
     api_url: Optional[str] = None,
     api_key: Optional[str] = None,
@@ -281,7 +360,7 @@ def export_rates_by_query(
     Returns a dict with summary info.
     """
     table_id, best_table, top_scored = find_best_term_table(
-        target_query=target_query, api_url=api_url, api_key=api_key, subject=subject
+        target_query=target_query, api_url=api_url, api_key=api_key, subject=subject, prefix_code=prefix_code
     )
 
     if best_table == "" and top_scored == "":

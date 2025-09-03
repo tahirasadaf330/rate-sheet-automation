@@ -10,7 +10,7 @@ Things to fix
 
 
 ===============
-Create a report
+Things discovered so far:
 
-- Showing why most of the emails failed (reason mainly due to subject also share the json file)
-- mention the fixes done to it
+- No rate table name Allip on jerasoft got an email with subject ([ALLIP][PREMIUM][1062#][USD])
+- 

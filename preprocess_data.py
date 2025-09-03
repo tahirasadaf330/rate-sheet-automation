@@ -20,6 +20,53 @@ def _codepoints(s):
     return " ".join(f"U+{ord(ch):04X}" for ch in s)
 
 
+# ─────────────────────────── Dst Code expander ───────────────────────────
+
+_DASHES_RE = re.compile(r'[–—−]')  # normalize en/em/minus to simple "-"
+
+def _parse_dst_code_list(code_str: str) -> list[str]:
+    """Split 'Dst Code' strings on comma/semicolon; expand hyphen ranges inclusive.
+       Treat everything that isn't a digit or '-' as noise. Preserve zero padding."""
+    if pd.isna(code_str):
+        return []
+    s = str(code_str).strip()
+    if not s:
+        return []
+
+    s = _DASHES_RE.sub('-', s)  # unify weird dashes
+    parts = re.split(r'[;,]', s)  # comma/semicolon = separate codes
+
+    out: list[str] = []
+    for part in parts:
+        token = re.sub(r'[^0-9\-]', '', part.strip())  # keep digits and hyphen only
+        if not token:
+            continue
+
+        if '-' in token:
+            lo_str, hi_str = token.split('-', 1)
+            if lo_str.isdigit() and hi_str.isdigit():
+                lo, hi = int(lo_str), int(hi_str)
+                if hi < lo:  # be forgiving if they reversed it
+                    lo, hi = hi, lo
+                width = max(len(lo_str), len(hi_str))
+                out.extend(f"{n:0{width}d}" for n in range(lo, hi + 1))
+                continue
+
+        # single code
+        out.append(token)
+
+    return out
+
+def expand_dst_code_rows(df: pd.DataFrame) -> pd.DataFrame:
+    """Explode rows that have multiple/ranged DST codes into one row per code."""
+    out = df.copy()
+    out['Dst Code'] = out['Dst Code'].astype(str).str.strip()
+    out['__dst_list'] = out['Dst Code'].apply(_parse_dst_code_list)
+    out = out.explode('__dst_list', ignore_index=True)
+    out['Dst Code'] = out['__dst_list'].fillna('')
+    out = out[out['Dst Code'] != ''].drop(columns='__dst_list').reset_index(drop=True)
+    return out
+
 # ---- Header pre-cleaner: strip currency symbols/codes and other noise ----
 
 _CURRENCY_SYMBOLS_RE = r'[$£€¥₹₩₽₺₫₪₴₦₱₲₵₡₭฿₮₸₼]'
@@ -183,7 +230,7 @@ ALIAS_MAP = {
     'price': 'Rate',
     'pricing_in': 'Rate',
     'rate_min($)': 'Rate',
-    'new price': 'Rate',
+    'new_price': 'Rate',
     'price_peak': 'Rate',
     'pricemin': 'Rate',
 
@@ -401,14 +448,24 @@ def load_clean_rates(path: str, output_path: str, sheet=None) -> pd.DataFrame:
     # Effective Date: robust parse (your helper returns Timestamp or NaT)
     df['Effective Date'] = df['Effective Date'].apply(normalise_date_any)
 
+    df = expand_dst_code_rows(df)
+
+    # Strip any non-digits left in Dst Code (kills '-', ';', spaces, exotic dashes, etc.)
+    df['Dst Code'] = (
+        df['Dst Code']
+        .astype(str)
+        .str.strip()
+        .str.replace(r'\D+', '', regex=True)  # keep only 0-9
+    )
+
     # finally, write the cleaned sheet
     df.to_excel(output_path, index=False)
     return df
 
 # ──────────────────────────── quick test ─────────────────────────────────────
 if __name__ == '__main__':
-    FILE_PATH = r'C:\Users\User\OneDrive - Hayo Telecom, Inc\Documents\Work\Rate Sheet Automation\rate-sheet-automation\attachments\rates_at_tele-geeks.net_20250901_095901\Hayo_Full_CC_-_Rate_Notification.xlsx'
-    OUTPUT_FILE_PATH = r'attachments/Hayo Telecom_cleaned.xlsx'
+    FILE_PATH = r'C:\Users\User\OneDrive - Hayo Telecom, Inc\Documents\Work\Rate Sheet Automation\rate-sheet-automation\test_files\TESTRANGE.xlsx'
+    OUTPUT_FILE_PATH = r'test_files\TESTRANGE_CLEANED.xlsx'
     cleaned = load_clean_rates(FILE_PATH, OUTPUT_FILE_PATH, 0)
    
     print('✅ Cleaned and saved.')
