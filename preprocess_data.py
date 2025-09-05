@@ -8,6 +8,14 @@ REQUIRED_COLS = [
     'Dst Code', 'Rate', 'Effective Date', 'Billing Increment'
 ]
 
+BILLING_PAIRS = [
+    ('initial_period', 'recurring_period'),
+    ('initial_period', 'subsequent_period'),
+    ('initial_increment', 'next_increment'),
+    ('min_bill', 'billing_step'),
+    ('first_increment', 'second_increment'),
+]
+
 EXCEL_EPOCH = datetime(1899, 12, 30)          # Excel’s epoch (PC versions)
 
 DEBUG = True
@@ -96,6 +104,53 @@ def _strip_currency_words_from_key(key: str) -> str:
     key = re.sub(r"_+", "_", key).strip("_")
     return key
 
+#________________________________handeling seperate billing increment columns ──────────────────────────────────
+
+def _last_num(s: str) -> str:
+    m = re.findall(r'\d+', str(s))
+    return m[-1] if m else ''
+
+def _synthesize_billing_increment(df: pd.DataFrame) -> pd.DataFrame:
+    # If already present and non-empty anywhere, keep it
+    if 'Billing Increment' in df.columns and df['Billing Increment'].astype(str).str.strip().ne('').any():
+        return df
+    
+    print("\n\n\nSynthesizing 'Billing Increment' from other columns...\n\n\n")
+
+    # map normalized -> actual column name
+    norm2real = { _norm(c): c for c in df.columns }
+
+    pairs = [
+        ('initial_period', 'recurring_period'),
+        ('initial_period', 'subsequent_period'),
+        ('initial_increment', 'next_increment'),
+        ('min_bill', 'billing_step'),
+        ('first_increment', 'second_increment'),
+    ]
+
+    for a, b in pairs:
+        if a in norm2real and b in norm2real:
+            ax = df[norm2real[a]].map(_last_num)
+            bx = df[norm2real[b]].map(_last_num)
+            mask = (ax != '') & (bx != '')
+            if mask.any():
+                df['Billing Increment'] = np.where(mask, ax + '/' + bx, '')
+                return df
+
+    # fallback: single-column duplication if we only have one increment-ish column
+    singles = ['initial_period', 'min_bill', 'first_increment']
+    for k in singles:
+        if k in norm2real:
+            one = df[norm2real[k]].map(_last_num)
+            if one.ne('').any():
+                df['Billing Increment'] = np.where(one != '', one + '/' + one, '')
+                return df
+
+    # ensure the column exists so downstream selection doesn't explode
+    df['Billing Increment'] = ''
+    return df
+
+
 #________________________________ read raw ──────────────────────────────────
 
 def _raw_from_ws(ws) -> pd.DataFrame:
@@ -159,6 +214,29 @@ def detect_header_row(raw: pd.DataFrame) -> int:
         mapped = [ALIAS_MAP.get(n) for n in normed]
 
         covered = {m for m in mapped if m}
+        ###################333
+         # NEW: if Billing Increment missing, satisfy it via known header pairs
+        if 'Billing Increment' not in covered:
+            norm_set = set(normed)
+
+            # slightly "fuzzy" match so 'recurring_period_sec' still counts
+            def _has_key(key: str) -> bool:
+                return any(
+                    n == key
+                    or n.startswith(key + '_')
+                    or n.endswith('_' + key)
+                    or ('_' + key + '_') in ('_' + n + '_')
+                    for n in norm_set
+                )
+
+            pair_hit = any(_has_key(a) and _has_key(b) for a, b in BILLING_PAIRS)
+            if pair_hit:
+                covered.add('Billing Increment')
+
+            # optional debug noise
+            print("  billing_pair_hit:", pair_hit, "pairs_checked:", BILLING_PAIRS)
+        ##################33333
+
         missing = targets - covered
 
         # DEBUG dump
@@ -256,6 +334,48 @@ ALIAS_MAP = {
     'rounding': 'Billing Increment',
 }
 
+# def _canonicalize_headers(df: pd.DataFrame) -> pd.DataFrame:
+#     original = list(df.columns)
+
+#     # 1) Preclean labels (kill $, €, USD, etc.)
+#     preclean_map = {c: _preclean_header_token(c) for c in original}
+#     # 2) Normalize
+#     norm_map = {c: _norm(preclean_map[c]) for c in original}
+#     # 3) Strip currency words that survived normalization (e.g., rate_usd -> rate)
+#     key_map = {c: _strip_currency_words_from_key(norm_map[c]) for c in original}
+#     # 4) Alias lookup on the final key
+#     alias_hit = {c: ALIAS_MAP.get(key_map[c]) for c in original}
+
+#     # DEBUG: show mapping pipeline
+#     dbg("[canon] original -> preclean -> norm -> key_strip -> alias:")
+#     for c in original:
+#         dbg(f"  {repr(c)}  ->  {repr(preclean_map[c])}  ->  {norm_map[c]}  ->  {key_map[c]}  ->  {alias_hit[c]}")
+#         if not alias_hit[c]:
+#             dbg("    codepoints(original):", _codepoints(c))
+
+#     # If alias matches, use canonical; otherwise keep the cleaned label
+#     mapped = {c: (alias_hit[c] if alias_hit[c] else preclean_map[c]) for c in original}
+#     df = df.rename(columns=mapped)
+
+#     # Verify required columns exist (in canonical names)
+#     missing = [c for c in REQUIRED_COLS if c not in df.columns]
+#     if missing:
+#         dbg("[canon] df.columns:", list(df.columns))
+#         dbg("[canon] missing required:", missing)
+#         dbg("[canon] precleaned originals:", preclean_map)
+#         dbg("[canon] normalized originals:", norm_map)
+#         dbg("[canon] stripped keys:", key_map)
+#         raise ValueError(
+#             "Missing required columns: "
+#             f"{missing}. Found headers: {original}. "
+#             f"Precleaned: {preclean_map}. "
+#             f"Normalized: {norm_map}. "
+#             f"Stripped keys: {key_map}. "
+#             "Add more variants to ALIAS_MAP or harden _norm/_preclean_header_token."
+#         )
+#     return df
+
+
 def _canonicalize_headers(df: pd.DataFrame) -> pd.DataFrame:
     original = list(df.columns)
 
@@ -268,7 +388,7 @@ def _canonicalize_headers(df: pd.DataFrame) -> pd.DataFrame:
     # 4) Alias lookup on the final key
     alias_hit = {c: ALIAS_MAP.get(key_map[c]) for c in original}
 
-    # DEBUG: show mapping pipeline
+    # DEBUG
     dbg("[canon] original -> preclean -> norm -> key_strip -> alias:")
     for c in original:
         dbg(f"  {repr(c)}  ->  {repr(preclean_map[c])}  ->  {norm_map[c]}  ->  {key_map[c]}  ->  {alias_hit[c]}")
@@ -279,8 +399,35 @@ def _canonicalize_headers(df: pd.DataFrame) -> pd.DataFrame:
     mapped = {c: (alias_hit[c] if alias_hit[c] else preclean_map[c]) for c in original}
     df = df.rename(columns=mapped)
 
-    # Verify required columns exist (in canonical names)
+    # ---------- NEW: tolerate missing Billing Increment if a known pair exists ----------
     missing = [c for c in REQUIRED_COLS if c not in df.columns]
+
+    if 'Billing Increment' in missing:
+        # normalize the CURRENT df.columns (post-rename) for fuzzy matching
+        normed_current = {_norm(_preclean_header_token(c)) for c in df.columns}
+
+        def _has_key(key: str) -> bool:
+            # fuzzy: exact, prefix, suffix, or underscore-delimited infix
+            return any(
+                n == key or
+                n.startswith(key + '_') or
+                n.endswith('_' + key) or
+                ('_' + key + '_') in ('_' + n + '_')
+                for n in normed_current
+            )
+
+        pair_hit = any(_has_key(a) and _has_key(b) for (a, b) in BILLING_PAIRS)
+        dbg("[canon] billing_pair_hit:", pair_hit, "pairs_checked:", BILLING_PAIRS)
+
+        if pair_hit:
+            # don’t count BI as missing; create placeholder so later selection won’t crash
+            missing = [m for m in missing if m != 'Billing Increment']
+            if 'Billing Increment' not in df.columns:
+                df['Billing Increment'] = ''   # _synthesize_billing_increment will fill this later
+            dbg("[canon] Billing Increment satisfied via header pair; will synthesize values later.")
+    # -----------------------------------------------------------------------------------
+
+    # Final guard
     if missing:
         dbg("[canon] df.columns:", list(df.columns))
         dbg("[canon] missing required:", missing)
@@ -296,7 +443,6 @@ def _canonicalize_headers(df: pd.DataFrame) -> pd.DataFrame:
             "Add more variants to ALIAS_MAP or harden _norm/_preclean_header_token."
         )
     return df
-
 # ──────────────────────────────── footer ─────────────────────────────────
 
 # Customize the keywords if you want to add more
@@ -384,16 +530,28 @@ def normalise_date_any(val) -> pd.Timestamp:
 
     return pd.NaT
 
+# def clean_billing_increment(val) -> str:
+#     """Normalize billing increment like 0/1/1, 0-60-60, '0 – 1 – 1', etc. → '1/1' or '60/60'.
+#        Takes the LAST TWO numeric tokens found. Returns '' if fewer than two numbers."""
+#     if pd.isna(val):
+#         return ''
+#     nums = re.findall(r'\d+', str(val))
+#     if len(nums) < 2:
+#         return ''
+#     a, b = int(nums[-2]), int(nums[-1])   # int() also strips leading zeros
+#     return f"{a}/{b}"
+
 def clean_billing_increment(val) -> str:
-    """Normalize billing increment like 0/1/1, 0-60-60, '0 – 1 – 1', etc. → '1/1' or '60/60'.
-       Takes the LAST TWO numeric tokens found. Returns '' if fewer than two numbers."""
     if pd.isna(val):
         return ''
     nums = re.findall(r'\d+', str(val))
-    if len(nums) < 2:
-        return ''
-    a, b = int(nums[-2]), int(nums[-1])   # int() also strips leading zeros
-    return f"{a}/{b}"
+    if len(nums) == 1:
+        n = int(nums[0]); return f"{n}/{n}"
+    if len(nums) >= 2:
+        a, b = int(nums[-2]), int(nums[-1])
+        return f"{a}/{b}"
+    return ''
+
 
 def load_clean_rates(path: str, output_path: str, sheet=None) -> pd.DataFrame:
     """
@@ -425,6 +583,7 @@ def load_clean_rates(path: str, output_path: str, sheet=None) -> pd.DataFrame:
 
     # 4) canonicalize & trim
     df = _canonicalize_headers(df)
+    df = _synthesize_billing_increment(df)
     df = trim_after_notes_and_strip_blank_above(df)
 
     # keep only canonical required columns
@@ -464,7 +623,7 @@ def load_clean_rates(path: str, output_path: str, sheet=None) -> pd.DataFrame:
 
 # ──────────────────────────── quick test ─────────────────────────────────────
 if __name__ == '__main__':
-    FILE_PATH = r'C:\Users\User\OneDrive - Hayo Telecom, Inc\Documents\Work\Rate Sheet Automation\rate-sheet-automation\test_files\TESTRANGE.xlsx'
+    FILE_PATH = r'C:\Users\User\OneDrive - Hayo Telecom, Inc\Documents\Work\Rate Sheet Automation\rate-sheet-automation\attachments to be compared\rate_at_qoolize.com_20250902_123633\Hayo_-_Premium_-_In_-Tech_Prefix__7013_-_02_Sep_2025_jerasoft_comparison.xlsx'
     OUTPUT_FILE_PATH = r'test_files\TESTRANGE_CLEANED.xlsx'
     cleaned = load_clean_rates(FILE_PATH, OUTPUT_FILE_PATH, 0)
    

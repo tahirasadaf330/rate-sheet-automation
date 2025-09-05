@@ -4,7 +4,7 @@
 from openpyxl import load_workbook
 import pandas as pd
 
-path = r'C:\Users\User\OneDrive - Hayo Telecom, Inc\Documents\Work\Rate Sheet Automation\rate-sheet-automation\test_files\Hayo Telecom Inc. Platinum 20.30.Aug.25.2025 174897940.xlsx'
+path = r'C:\Users\User\OneDrive - Hayo Telecom, Inc\Documents\Work\Rate Sheet Automation\rate-sheet-automation\attachments to be compared\rate_at_qoolize.com_20250902_123633\Hayo_-_Premium_-_In_-Tech_Prefix__7013_-_02_Sep_2025.Xlsx'
 
 wb = load_workbook(path, data_only=True, read_only=True)
 ws = wb.active

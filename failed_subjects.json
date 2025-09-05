@@ -1,7 +1,9 @@
 {
   "rates@alkaip.com": [
     "Automatic reply Re: New Offer to HAYO TELECOM INC CC - 090125 - AlkaIP Telecom",
-    "New Offer to HAYO TELECOM INC CC - 090125 - AlkaIP Telecom"
+    "New Offer to HAYO TELECOM INC CC - 090125 - AlkaIP Telecom",
+    "New Offer to HAYO TELECOM INC - 090425 - AlkaIP Telecom",
+    "New Offer to HAYO TELECOM INC - 090325 - AlkaIP Telecom"
   ],
   "rates@iconnectglobal.com": [
     "Iconnect Rate Notification to HAYO_Hayotel_Premium_C_8562",
@@ -26,7 +28,8 @@
     "Ratecard update Go4Mobility 2024.09.02"
   ],
   "rates@saftelco.com": [
-    "RATES_SAFTEL COMMUNICATIONS LTD"
+    "RATES_SAFTEL COMMUNICATIONS LTD",
+    "RE: RATES_SAFTEL COMMUNICATIONS LTD"
   ],
   "voice.rates@toku.co": [
     "Toku A-Z offer to Hayo Premium 6 Sept. 2025"
@@ -55,7 +58,11 @@
     "HAYO_ORTP Confirmed receiving RN no. 124013",
     "Partial Rate Notification - ID No. 124015 - HAYO_NCLI",
     "Partial Rate Notification - ID No. 124013 - HAYO_ORTP",
-    "Re: Billing Increment Change – Cambodia All (+855) Effective September 1, 2025"
+    "Re: Billing Increment Change – Cambodia All (+855) Effective September 1, 2025",
+    "Partial Rate Notification - ID No. 124115 - HAYO_CLI",
+    "HAYO_NCLI Confirmed receiving RN no. 123976",
+    "HAYO_NCLI Confirmed receiving RN no. 124095",
+    "Partial Rate Notification - ID No. 124095 - HAYO_NCLI"
   ],
   "rates@ngncorp.com": [
     "Standard Rate Offer",
@@ -67,7 +74,8 @@
   ],
   "rates@dialtel.net": [
     "Hayo_Standard_in 2025-08-29 07:00:00 (Rate Notification from Dialtel)",
-    "RE: HAYO FULL A-Z REPLACE ORIG CC DIALTEL PREFIX:NONE"
+    "RE: HAYO FULL A-Z REPLACE ORIG CC DIALTEL PREFIX:NONE",
+    "Hayo_CC_in 2025-09-03 10:00:00 (Rate Notification from Dialtel)"
   ],
   "rates@evox.fr": [
     "Evox Pricelist"
@@ -76,13 +84,41 @@
     "Rate Offer For HAYOTEL-SILVER-IN  2025.08.29 04:21:54 - Full (A-Z)"
   ],
   "buy@quickdialusa.net": [
-    "REMINDER HAYO RN #QD035936# 2025-08-27"
+    "REMINDER HAYO RN #QD035936# 2025-08-27",
+    "HAYO RN #QD036014# 2025-09-03"
   ],
   "rates@saifglobal.net": [
     "Saif Global Rate Sheet Standard A To Z"
   ],
   "rates@brilliantholdings.com": [
     "Rate notification #5378, Service type: Hayo_Special, Tech. prefix: 9999#, Change type: Full A-Z",
-    "Rate notification #5355, Service type: Hayo_Special, Tech. prefix: 9999#, Change type: Full A-Z"
+    "Rate notification #5355, Service type: Hayo_Special, Tech. prefix: 9999#, Change type: Full A-Z",
+    "[RTS133359] Re: Re: Rate notification #5378, Service type: Hayo_Special, Tech. prefix: 9999#, Change type: Full A-Z",
+    "[RTS133357] Re: Re: Rate notification #5355, Service type: Hayo_Special, Tech. prefix: 9999#, Change type: Full A-Z",
+    "[RTS133351] Re: Re: Rate notification #5355, Service type: Hayo_Special, Tech. prefix: 9999#, Change type: Full A-Z"
+  ],
+  "rates@datora.net": [
+    "Full Country Rate Addendum from Datora France (previously NGN Sweden) -> HAYO TELECOM"
+  ],
+  "rates@ipbtel.com": [
+    "New Rates for HAYO TELECOM CC-CLI from IPBTel Sep 04, 2025",
+    "New Rates for HAYO TELECOM from IPBTel Sep 04, 2025",
+    "New Rates for HAYO TELECOM from IPBTel Sep 03, 2025"
+  ],
+  "rates@gomobit.com": [
+    "Gold Rate Notification to Hayotel"
+  ],
+  "rates@dawnglobal.net": [
+    "DGS Rate Notification for GOLD SERVICE - 09/04/2025 12:58"
+  ],
+  "rateadmin@proof.tatacommunications.com": [
+    "Tata Communications REFLEX confirmation HAYO TELECOM, INC.(VTSPREF - Terminator), CMS ID: 66914",
+    "Tata Communications REFLEX confirmation HAYO TELECOM, INC.(VTSPRIME), CMS ID: 41960"
+  ],
+  "rates@hansatelecom.com": [
+    "Re: HAYO FULL A-Z REPLACE ORIG PLATINUM HANSA TELECOM PREFIX:00"
+  ],
+  "pricelist@mobik.com": [
+    "MOBIK Rate Change Notification 2025-09-10"
   ]
 }
