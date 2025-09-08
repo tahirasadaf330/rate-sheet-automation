@@ -104,13 +104,62 @@ def _strip_currency_words_from_key(key: str) -> str:
     key = re.sub(r"_+", "_", key).strip("_")
     return key
 
-#________________________________handeling seperate billing increment columns ──────────────────────────────────
+#________________________________handeling seperate/duplicate billing increment columns ──────────────────────────────────
+
+def _coalesce_billing_increment_dupes(df: pd.DataFrame, col_name: str = 'Billing Increment') -> pd.DataFrame:
+    """
+    If there are 2+ columns named `col_name`, combine the FIRST TWO into a single 'a/b' string per row:
+      - a = last integer from the first dup column
+      - b = last integer from the second dup column
+      - If only one side exists on a row, duplicate it as a/a or b/b
+    Drops all original dup columns and inserts a single consolidated column at the
+    position of the first duplicate. No-op if <2 duplicates exist.
+    """
+    # locate duplicates by position, not by label
+    mask = (df.columns == col_name)
+    idxs = np.flatnonzero(mask)
+    if len(idxs) < 2:
+        return df  # nothing to do
+
+    # grab the first two duplicate columns by position
+    block = df.iloc[:, idxs]
+    left_raw = block.iloc[:, 0]
+    right_raw = block.iloc[:, 1]
+
+    # reuse your existing number extractor
+    def _num_last(x) -> str:
+        return _last_num(x)  # already defined in your file
+
+    left = left_raw.map(_num_last).fillna('')
+    right = right_raw.map(_num_last).fillna('')
+
+    # build the consolidated a/b values
+    out = pd.Series('', index=df.index, dtype='object')
+    both = (left != '') & (right != '')
+    only_l = (left != '') & (right == '')
+    only_r = (left == '') & (right != '')
+
+    out.loc[both] = left[both] + '/' + right[both]
+    out.loc[only_l] = left[only_l] + '/' + left[only_l]
+    out.loc[only_r] = right[only_r] + '/' + right[only_r]
+    # rows where both sides empty remain ''
+
+    # drop all dup columns, insert the consolidated one at the original first position
+    first_pos = int(idxs[0])
+    df = df.drop(columns=block.columns)
+    df.insert(min(first_pos, len(df.columns)), col_name, out)
+
+    return df
+
 
 def _last_num(s: str) -> str:
     m = re.findall(r'\d+', str(s))
     return m[-1] if m else ''
 
 def _synthesize_billing_increment(df: pd.DataFrame) -> pd.DataFrame:
+
+    df = _coalesce_billing_increment_dupes(df)
+
     # If already present and non-empty anywhere, keep it
     if 'Billing Increment' in df.columns and df['Billing Increment'].astype(str).str.strip().ne('').any():
         return df
@@ -320,6 +369,7 @@ ALIAS_MAP = {
     'valid_from': 'Effective Date',
     'date': 'Effective Date',
     'effectivedate': 'Effective Date',
+    'efective_date': 'Effective Date',  
 
 
     # Billing Increment
@@ -331,6 +381,7 @@ ALIAS_MAP = {
     'billingincrement': 'Billing Increment',
     'rounding_rules': 'Billing Increment',
     'rounding': 'Billing Increment',
+    'billing_terms': 'Billing Increment',
 }
 
 def _canonicalize_headers(df: pd.DataFrame) -> pd.DataFrame:
@@ -568,7 +619,7 @@ def load_clean_rates(path: str, output_path: str, sheet=None) -> pd.DataFrame:
 
 # ──────────────────────────── quick test ─────────────────────────────────────
 if __name__ == '__main__':
-    FILE_PATH = r'C:\Users\User\OneDrive - Hayo Telecom, Inc\Documents\Work\Rate Sheet Automation\rate-sheet-automation\attachments to be compared\rate_at_qoolize.com_20250902_123633\Hayo_-_Premium_-_In_-Tech_Prefix__7013_-_02_Sep_2025.Xlsx'
+    FILE_PATH = r'C:\Users\User\OneDrive - Hayo Telecom, Inc\Documents\Work\Rate Sheet Automation\rate-sheet-automation\attachments to be compared\rates_at_alkaip.com_20250904_151710\R_A_HAYO_TELECOM_INC_090425.xlsx'
     OUTPUT_FILE_PATH = r'test_files\hayotelecombilig_cleaned.xlsx'
     cleaned = load_clean_rates(FILE_PATH, OUTPUT_FILE_PATH, 0)
    
