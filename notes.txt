@@ -1,16 +1,5 @@
 Quickcom tel com PRM trunk Prefix:001 USD
 
+- still there are some files whoes number of rows is showed wrongly even by the openpxl so you might have to setup a way by which you open the files 
+on the server to recalculate the valid range progmatically...
 
-===============
-Things to fix 
-
-- Table name mismatch try to lock down the one based on the exact prefix group
-- Add multiple code handeling     
-- Fix the cleaning stuck Issues   (DONE)
-
-
-===============
-Things discovered so far:
-
-- No rate table name Allip on jerasoft got an email with subject ([ALLIP][PREMIUM][1062#][USD])
-- 
