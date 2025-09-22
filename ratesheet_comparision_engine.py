@@ -137,13 +137,40 @@ def compare(left: pd.DataFrame, right: pd.DataFrame, as_of_date: Optional[str], 
         if invalid:
             print(f"   Validation issues: {left_reasons + right_reasons}")
 
+        # if bi_changed[i]:
+        #     print(" → Billing Increment changed")
+        #     change_type = "Billing Increments Changes"
+        #     status = "Rejected"
+        #     notes.append("billing increment changed")
+        #     if can_compare_rate[i] and not np.isclose(n_rate, o_rate, atol=rate_tol):
+        #         notes.append("rate changed")
+        
+#################################
+# Changed to tackle the status rejected issue
+################################
         if bi_changed[i]:
             print(" → Billing Increment changed")
             change_type = "Billing Increments Changes"
-            status = "Rejected"
+            eff_note = effective_note(n_date, as_of, notice_days)
+
+            # Accept only with proper notice; reject backdated or short notice
+            if n_date < as_of:
+                status = "Rejected"
+                notes.append("immediate effective date")
+            elif eff_note == "proper 7-day notice":
+                status = "Accepted"
+                notes.append("proper 7-day notice")
+            else:
+                status = "Rejected"
+                notes.append(eff_note)
+
             notes.append("billing increment changed")
+
+            # If rate ALSO changed (beyond tolerance), mention it in notes
             if can_compare_rate[i] and not np.isclose(n_rate, o_rate, atol=rate_tol):
                 notes.append("rate changed")
+############################
+###########################
         else:
             if can_compare_rate[i]:
                 delta = n_rate - o_rate

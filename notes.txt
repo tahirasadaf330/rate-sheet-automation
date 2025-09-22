@@ -3,16 +3,10 @@ Quickcom tel com PRM trunk Prefix:001 USD
 - still there are some files whoes number of rows is showed wrongly even by the openpxl so you might have to setup a way by which you open the files 
 on the server to recalculate the valid range progmatically...
 
-=============================
-issues
 
-C:\Users\User\OneDrive - Hayo Telecom, Inc\Documents\Work\Rate Sheet Automation\rate-sheet-automation\attachments to be compared\rates_at_alkaip.com_20250904_151710\R_A_HAYO_TELECOM_INC_090425.xlsx
 
-in this file issue is in billing terms appearance.
 
-==========
+Questions to ask
 
-why this subjec got classified
-A-Z RN To Hayotel CLI Tech Prefix 8731 USD
+the company name allip does not exist 
 
-===========

@@ -13,7 +13,6 @@ path to the directory.
 then read that meta data file and create all the comparision files using jerasoft and save in the same directory.
 
 then preprocess all the files 
-
 """
 from jerasoft import export_rates_by_query
 from ratesheet_comparision_engine import read_table, compare, write_excel
