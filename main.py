@@ -409,16 +409,42 @@ def compare_preprocessed_folders(
                 continue
 
             try:
+                # right_df = read_table(str(v), sheet_right)
+                # result, stats = compare(left_df, right_df, as_of_date, notice_days, rate_tol)
+
+                # # NEW: always name by vendor file + "_comparision_difference.xlsx"
+                # out_path = folder / f"{v.stem}_comparision_result.xlsx"
+
+                # write_excel(result, str(out_path))
+                # writes += 1
+                # comp_result[vname] = True
+                # print(f"    ✔ wrote {out_path} ({len(result)} rows)")
+
+
+
                 right_df = read_table(str(v), sheet_right)
-                result = compare(left_df, right_df, as_of_date, notice_days, rate_tol)
+                result, stats = compare(left_df, right_df, as_of_date, notice_days, rate_tol)
 
-                # NEW: always name by vendor file + "_comparision_difference.xlsx"
                 out_path = folder / f"{v.stem}_comparision_result.xlsx"
-
                 write_excel(result, str(out_path))
                 writes += 1
                 comp_result[vname] = True
                 print(f"    ✔ wrote {out_path} ({len(result)} rows)")
+
+                # ⬇️ persist per-attachment stats into metadata
+                try:
+                    meta.setdefault("attachment_stats", {})
+                    stats_key = f"{v.name}"  # e.g. VendorA.xlsx_stats
+                    meta["attachment_stats"][stats_key] = {
+                        **stats,
+                        "source_attachment": v.name,                    # the vendor file we compared
+                        "result_file": out_path.name,                   # the Excel we just wrote
+                        "generated_at_utc": datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
+                    }
+                    _write_metadata(folder, meta)
+                except Exception as e:
+                    print(f"    ⚠ failed to update attachment_stats in metadata: {e}")
+
             except Exception as e:
                 comp_result[vname] = False
                 print(f"    ✖ failed comparison for {vname}: {e}")

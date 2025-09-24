@@ -80,6 +80,28 @@ def effective_note(new_date: Optional[pd.Timestamp], as_of: pd.Timestamp, notice
         return "proper 7-day notice"
     return "new without 7-day notice"
 
+#############################
+# Counting stats like number of rows, increase, decrease etc..
+############################
+
+CHANGE_TYPES = {
+    "new": "New",
+    "increase": "Increase",
+    "decrease": "Decrease",
+    "unchanged": "Unchanged",
+    "closed": "Closed",
+    "backdated_increase": "Backdated Increase",
+    "backdated_decrease": "Backdated Decrease",
+    "billing_increment_changes": "Billing Increments Changes",
+}
+
+def summarize_changes(df: pd.DataFrame) -> dict:
+    ct = df["Change Type"].astype(str)
+    return {
+        "total_rows": int(len(df)),
+        **{key: int((ct == label).sum()) for key, label in CHANGE_TYPES.items()},
+    }
+
 def compare(left: pd.DataFrame, right: pd.DataFrame, as_of_date: Optional[str], notice_days: int, rate_tol: float) -> pd.DataFrame:
     left_dedup = keep_latest_per_code(left)
     right_dedup = keep_latest_per_code(right)
@@ -224,8 +246,10 @@ def compare(left: pd.DataFrame, right: pd.DataFrame, as_of_date: Optional[str], 
     if not out.empty:
         out = out.sort_values(by=["Code", "Change Type"], kind="mergesort")
     print(f"\n▶ Finished. Produced {len(out)} rows after comparison")
-    return out
-
+    stats = summarize_changes(out)
+    # returning out and stats
+    return out, stats 
+    
 def write_excel(df: pd.DataFrame, path: str) -> None:
     with pd.ExcelWriter(path, engine="xlsxwriter") as writer:
         df.to_excel(writer, index=False, sheet_name="comparison")

@@ -10,3 +10,23 @@ Questions to ask
 
 the company name allip does not exist 
 
+
+==================================
+
+New Changes to make
+
+1- Store the following details regarding each file in the meta data:
+total_rows, new, increased, decreased, unchanged, closed, backdated_increase, backdated_decrease, billing_increment_changes 
+(under key rate_summary(name of that attachment))
+
+see if you can add in here as a value in front of the file name: `` "attachments": [
+    "Bankai_Gold_56011_USD_9_.xlsx"
+  ],``
+
+2- Fetch the col name (code_name and add that too in the final resultant file)
+
+3- Add the billing_inrement col (old and new) in the resultant file
+
+4- Store the rejected emails in the seperat table
+ 
+5- Take the authorized emails from the db instead of the script (low priority)
