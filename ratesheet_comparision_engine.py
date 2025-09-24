@@ -7,8 +7,18 @@ COL_CODE = "Dst Code"
 COL_RATE = "Rate"
 COL_EDATE = "Effective Date"
 COL_BI = "Billing Increment"
+COL_NAME = "Dst Code Name"
 
-OUT_COLS = ["Code", "Old Rate", "New Rate", "Effective Date", "Status", "Change Type", "Notes"]
+
+# OUT_COLS = ["Code", "Dst Code Name", "Old Rate", "New Rate", "Effective Date", "Status", "Change Type", "Notes"]
+
+OUT_COLS = [
+    "Code", "Dst Code Name",
+    "Old Rate", "New Rate",
+    "Old Billing Increment", "New Billing Increment",  
+    "Effective Date", "Status", "Change Type", "Notes"
+]
+
 
 def read_table(path: str, sheet: Optional[str] = None) -> pd.DataFrame:
     ext = os.path.splitext(path)[1].lower()
@@ -18,11 +28,35 @@ def read_table(path: str, sheet: Optional[str] = None) -> pd.DataFrame:
         df = pd.read_csv(path)
     else:
         raise ValueError(f"Unsupported file type: {ext}")
+    
+
+    # expected = [COL_CODE, COL_RATE, COL_EDATE, COL_BI]
+    # missing = [c for c in expected if c not in df.columns]
+    # if missing:
+    #     raise ValueError(f"Missing expected columns {missing} in {path}. Found: {list(df.columns)}")
+    # df = df[expected].copy()
+
+
+    #########################
+    # Adding other code name col
+
     expected = [COL_CODE, COL_RATE, COL_EDATE, COL_BI]
+    optional = [COL_NAME]  # keep if present
+
     missing = [c for c in expected if c not in df.columns]
     if missing:
         raise ValueError(f"Missing expected columns {missing} in {path}. Found: {list(df.columns)}")
-    df = df[expected].copy()
+
+    present = expected + [c for c in optional if c in df.columns]
+    df = df[present].copy()
+
+    # optional light cleanup
+    if COL_NAME in df.columns:
+        df[COL_NAME] = df[COL_NAME].astype(str).str.strip()
+
+    #########################
+
+
 
     df[COL_CODE] = df[COL_CODE].apply(lambda x: '' if pd.isna(x) else str(x).strip())
     df[COL_CODE] = df[COL_CODE].str.replace(r'\.0+$', '', regex=True)
@@ -131,6 +165,37 @@ def compare(left: pd.DataFrame, right: pd.DataFrame, as_of_date: Optional[str], 
         n_date = r.get(f"{COL_EDATE}_new", pd.NaT)
         notes: List[str] = []
 
+        #########################
+        # ading the code name col
+        
+        name_new   = r.get(f"{COL_NAME}_new")
+        name_old   = r.get(f"{COL_NAME}_old")
+        name_plain = r.get(COL_NAME)  # unsuffixed column when only one side had it
+
+        dst_name = (name_new if isinstance(name_new, str) and name_new.strip()
+                    else name_old if isinstance(name_old, str) and name_old.strip()
+                    else name_plain if isinstance(name_plain, str) and name_plain.strip()
+                    else None)
+
+
+
+
+
+        # Billing Increment (old/new)
+        bi_old = r.get(f"{COL_BI}_old")
+        bi_new = r.get(f"{COL_BI}_new")
+
+        def _clean_bi(x):
+            if isinstance(x, str):
+                s = x.strip()
+                return s if s else None
+            return None
+
+        bi_old = _clean_bi(bi_old)
+        bi_new = _clean_bi(bi_new)
+
+        ########################
+
         # print(f"\n--- Row {i} | Code={code} ---")
         # print(f" OldRate={o_rate}, NewRate={n_rate}, EffDate={n_date}, BI_old={r.get(f'{COL_BI}_old')}, BI_new={r.get(f'{COL_BI}_new')}")
 
@@ -145,12 +210,12 @@ def compare(left: pd.DataFrame, right: pd.DataFrame, as_of_date: Optional[str], 
                 print(f"   Validation failed: {reasons}")
                 status = "Rejected"
                 notes.extend(reasons)
-            rows.append({"Code": code, "Old Rate": o_rate, "New Rate": n_rate, "Effective Date": n_date, "Status": status, "Change Type": change_type, "Notes": "; ".join(dict.fromkeys(notes))})
+            rows.append({"Code": code, "Dst Code Name": dst_name, "Old Rate": o_rate, "New Rate": n_rate, "Old Billing Increment": bi_old, "New Billing Increment": bi_new, "Effective Date": n_date, "Status": status, "Change Type": change_type, "Notes": "; ".join(dict.fromkeys(notes))})
             continue
 
         if left_only[i]:
             print(" → Detected as CLOSED")
-            rows.append({"Code": code, "Old Rate": o_rate, "New Rate": n_rate, "Effective Date": n_date, "Status": "Rejected", "Change Type": "Closed", "Notes": "present in current system but missing in new (closed)"})
+            rows.append({"Code": code, "Dst Code Name": dst_name, "Old Rate": o_rate, "New Rate": n_rate,  "Old Billing Increment": bi_old, "New Billing Increment": bi_new, "Effective Date": n_date, "Status": "Rejected", "Change Type": "Closed", "Notes": "present in current system but missing in new (closed)"})
             continue
 
         left_reasons = validate_row(pd.Series({COL_CODE: r[COL_CODE], COL_RATE: o_rate, COL_EDATE: r.get(f"{COL_EDATE}_old", pd.NaT), COL_BI: r.get(f"{COL_BI}_old", "")}))
@@ -240,7 +305,7 @@ def compare(left: pd.DataFrame, right: pd.DataFrame, as_of_date: Optional[str], 
             notes.extend(left_reasons)
             notes.extend(right_reasons)
 
-        rows.append({"Code": code, "Old Rate": o_rate, "New Rate": n_rate, "Effective Date": n_date, "Status": status, "Change Type": change_type, "Notes": "; ".join(dict.fromkeys(notes))})
+        rows.append({"Code": code, "Dst Code Name": dst_name, "Old Rate": o_rate, "New Rate": n_rate, "Old Billing Increment": bi_old, "New Billing Increment": bi_new, "Effective Date": n_date, "Status": status, "Change Type": change_type, "Notes": "; ".join(dict.fromkeys(notes))})
 
     out = pd.DataFrame(rows, columns=OUT_COLS)
     if not out.empty:

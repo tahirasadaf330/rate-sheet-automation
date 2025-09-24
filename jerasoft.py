@@ -470,7 +470,8 @@ def export_rates_by_query(
 if __name__ == "__main__":
     # Example quick-start (reads API key from env):
     info = export_rates_by_query(
-        target_query="lalaghsdh",
+        subject="Quickcom tel com PRM trunk Prefix:001 USD",
+        target_query="Quickcom tel com PRM trunk Prefix:001 USD",
         output_path="quickcom_rates.xlsx",
     )
     print(json.dumps(info, indent=2))

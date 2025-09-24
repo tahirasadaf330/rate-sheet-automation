@@ -583,7 +583,15 @@ def load_clean_rates(path: str, output_path: str, sheet=None) -> pd.DataFrame:
     df = trim_after_notes_and_strip_blank_above(df)
 
     # keep only canonical required columns
-    df = df[REQUIRED_COLS].copy()
+
+    if "jerasoft" in str(path).lower():
+        # make sure "Dst Code" is included exactly once
+        if "Dst Code Name" not in REQUIRED_COLS:
+            REQUIRED_COLS.append("Dst Code Name")
+        df = df[REQUIRED_COLS].copy()
+
+    else:
+        df = df[REQUIRED_COLS].copy()
 
     # 5) clean fields
     # Dst Code: keep as string, strip; drop truly empty codes
