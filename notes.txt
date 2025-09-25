@@ -27,6 +27,16 @@ see if you can add in here as a value in front of the file name: `` "attachments
 
 3- Add the billing_inrement col (old and new) in the resultant file
 
-4- Store the rejected emails in the seperat table
+4- Store the rejected emails in the seperate table
+two type of failed emails one failed due to subject or other issues and one failed due to comparision and email not in the verified sender list.
  
 5- Take the authorized emails from the db instead of the script (low priority)
+
+
+
+
+
+Email not in the verified list.
+Subject fails
+Email has no attachments
+Extension not allowed like pdf or other
