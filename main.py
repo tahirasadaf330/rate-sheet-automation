@@ -26,8 +26,12 @@ from datetime import datetime, timezone
 from database import insert_rate_upload, bulk_insert_rate_upload_details, replace_rejected_emails_metadata
 import pandas as pd
 from typing import Any 
+from valid_emails import refresh_verified_senders
+
  
 FAILED_EMAILS_PATH = Path(__file__).with_name("failed_emails.json")
+
+# refresh_verified_senders()
 
 #_____________ Email Verification Script_____________
 

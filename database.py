@@ -134,7 +134,6 @@ def _chunked(seq: List[tuple], size: int):
 #         conn.commit()
 #     return total
 
-
 def bulk_insert_rate_upload_details(
     rate_upload_id: int,
     details: Iterable[Dict[str, Any]],
@@ -206,6 +205,42 @@ def replace_rejected_emails_metadata(meta_data: Dict[str, Any]) -> int:
         new_id = cur.fetchone()[0]
         conn.commit()
         return new_id
+    
+def fetch_authorized_sender_emails(active_only: bool = True) -> List[str]:
+    """
+    Return a list of email addresses from the authorized_senders table.
+
+    Args:
+        active_only: If True (default), only rows with status = TRUE are returned.
+                     If False, all rows are returned regardless of status.
+
+    Returns:
+        List[str]: deduplicated, trimmed email addresses ordered alphabetically.
+    """
+    where = "WHERE status IS TRUE" if active_only else ""
+    sql = f"""
+        SELECT email
+        FROM authorized_senders
+        {where}
+        ORDER BY email ASC;
+    """
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(sql)
+        rows = cur.fetchall()
+
+    # Trim, drop empties, and dedupe while preserving sort from SQL
+    seen = set()
+    emails: List[str] = []
+    for (email,) in rows:
+        if not email:
+            continue
+        e = email.strip()
+        if e and e not in seen:
+            seen.add(e)
+            emails.append(e)
+
+    return emails
+
 
 
 insert_authorized_senders(VERIFIED_SENDERS)
