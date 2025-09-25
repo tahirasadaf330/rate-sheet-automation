@@ -243,4 +243,4 @@ def fetch_authorized_sender_emails(active_only: bool = True) -> List[str]:
 
 
 
-# insert_authorized_senders(VERIFIED_SENDERS)
+insert_authorized_senders(VERIFIED_SENDERS)
