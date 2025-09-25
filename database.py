@@ -1,11 +1,12 @@
 import os
 from dotenv import load_dotenv
 import psycopg2
-from psycopg2.extras import execute_values
 from valid_emails import VERIFIED_SENDERS
 from typing import Iterable, Dict, Any, Optional, List
 from datetime import datetime
 from decimal import Decimal
+import json
+from psycopg2.extras import execute_values, Json 
 
 # Load environment variables
 load_dotenv()
@@ -45,25 +46,94 @@ def insert_authorized_senders(emails):
 # -----------------------------
 # 1) Insert into rate_uploads and RETURN id
 # -----------------------------
-def insert_rate_upload(sender_email: str, received_at: Optional[datetime] = None) -> int:
+# def insert_rate_upload(sender_email: str, received_at: Optional[datetime] = None) -> int:
+#     """
+#     Insert a row into rate_uploads and return its id.
+#     """
+#     query = """
+#         INSERT INTO rate_uploads (sender_email, received_at, created_at, updated_at)
+#         VALUES (%s, COALESCE(%s, NOW()), NOW(), NOW())
+#         RETURNING id;
+#     """
+#     with get_conn() as conn, conn.cursor() as cur:
+#         cur.execute(query, (sender_email, received_at))
+#         rate_upload_id = cur.fetchone()[0]
+#         conn.commit()
+#         print(f"Inserted rate upload from {sender_email} → id={rate_upload_id}")
+#         return rate_upload_id
+    
+def insert_rate_upload(sender_email: str, received_at: Optional[datetime] = None, meta_data: Optional[Dict[str, Any]] = None) -> int:
     """
     Insert a row into rate_uploads and return its id.
+    Insert meta_data into the rate_uploads table.
     """
     query = """
-        INSERT INTO rate_uploads (sender_email, received_at, created_at, updated_at)
-        VALUES (%s, COALESCE(%s, NOW()), NOW(), NOW())
+        INSERT INTO rate_uploads (sender_email, received_at, created_at, updated_at, meta_data)
+        VALUES (%s, COALESCE(%s, NOW()), NOW(), NOW(), %s)
         RETURNING id;
     """
     with get_conn() as conn, conn.cursor() as cur:
-        cur.execute(query, (sender_email, received_at))
+        cur.execute(query, (sender_email, received_at, json.dumps(meta_data) if meta_data else None))
         rate_upload_id = cur.fetchone()[0]
         conn.commit()
         print(f"Inserted rate upload from {sender_email} → id={rate_upload_id}")
         return rate_upload_id
-    
+
 def _chunked(seq: List[tuple], size: int):
     for i in range(0, len(seq), size):
         yield seq[i:i+size]
+
+# def bulk_insert_rate_upload_details(
+#     rate_upload_id: int,
+#     details: Iterable[Dict[str, Any]],
+#     batch_size: int = 1000,   # tune as needed
+# ) -> int:
+#     """
+#     Bulk insert rows and return the TRUE total inserted count.
+#     Works even when execute_values paginates internally.
+#     """
+#     rows = [
+#         (
+#             rate_upload_id,
+#             d["dst_code"],
+#             d.get("rate_existing"),
+#             d.get("rate_new"),
+#             d.get("effective_date"),
+#             d.get("change_type"),
+#             d.get("status"),
+#             d.get("notes"),
+#         )
+#         for d in details
+#     ]
+#     if not rows:
+#         return 0
+
+#     sql = """
+#         INSERT INTO rate_upload_details
+#         (rate_upload_id, dst_code, rate_existing, rate_new, effective_date,
+#          change_type, status, notes, created_at, updated_at)
+#         VALUES %s
+#         RETURNING 1
+#     """
+#     tpl = "(%s,%s,%s,%s,%s,%s,%s,%s,NOW(),NOW())"
+
+#     total = 0
+#     with get_conn() as conn, conn.cursor() as cur:
+#         for chunk in _chunked(rows, batch_size):
+#             # Ensure a single statement per chunk by making page_size=len(chunk)
+#             try:
+#                 # psycopg2>=2.8 supports fetch=True: returns all RETURNING rows across pages
+#                 returned = execute_values(
+#                     cur, sql, chunk, template=tpl, page_size=len(chunk), fetch=True
+#                 )
+#                 total += len(returned) if returned is not None else 0
+#             except TypeError:
+#                 # Older psycopg2: no fetch kwarg. Use rowcount per chunk.
+#                 execute_values(cur, sql, chunk, template=tpl, page_size=len(chunk))
+#                 total += cur.rowcount  # count for this chunk (single statement)
+#         conn.commit()
+#     return total
+
 
 def bulk_insert_rate_upload_details(
     rate_upload_id: int,
@@ -84,6 +154,9 @@ def bulk_insert_rate_upload_details(
             d.get("change_type"),
             d.get("status"),
             d.get("notes"),
+            d.get("old_billing_increment"),   # New field
+            d.get("new_billing_increment"),   # New field
+            d.get("code_name"),               # New field
         )
         for d in details
     ]
@@ -93,27 +166,46 @@ def bulk_insert_rate_upload_details(
     sql = """
         INSERT INTO rate_upload_details
         (rate_upload_id, dst_code, rate_existing, rate_new, effective_date,
-         change_type, status, notes, created_at, updated_at)
+         change_type, status, notes, old_billing_increment, new_billing_increment, code_name, created_at, updated_at)
         VALUES %s
         RETURNING 1
     """
-    tpl = "(%s,%s,%s,%s,%s,%s,%s,%s,NOW(),NOW())"
+    tpl = "(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW(),NOW())"
 
     total = 0
     with get_conn() as conn, conn.cursor() as cur:
         for chunk in _chunked(rows, batch_size):
             # Ensure a single statement per chunk by making page_size=len(chunk)
             try:
-                # psycopg2>=2.8 supports fetch=True: returns all RETURNING rows across pages
                 returned = execute_values(
                     cur, sql, chunk, template=tpl, page_size=len(chunk), fetch=True
                 )
                 total += len(returned) if returned is not None else 0
             except TypeError:
-                # Older psycopg2: no fetch kwarg. Use rowcount per chunk.
                 execute_values(cur, sql, chunk, template=tpl, page_size=len(chunk))
                 total += cur.rowcount  # count for this chunk (single statement)
         conn.commit()
     return total
 
-# insert_authorized_senders(VERIFIED_SENDERS)
+def replace_rejected_emails_metadata(meta_data: Dict[str, Any]) -> int:
+    """
+    Replace the contents of rejected_emails with a single row containing meta_data.
+    Returns the inserted row id.
+    """
+    delete_sql = "DELETE FROM rejected_emails;"
+    insert_sql = """
+        INSERT INTO rejected_emails (meta_data, created_at, updated_at)
+        VALUES (%s, NOW(), NOW())
+        RETURNING id;
+    """
+    with get_conn() as conn, conn.cursor() as cur:
+        # wipe previous rows
+        cur.execute(delete_sql)
+        # insert the new JSON (Json() ensures proper JSON/JSONB casting)
+        cur.execute(insert_sql, (Json(meta_data),))
+        new_id = cur.fetchone()[0]
+        conn.commit()
+        return new_id
+
+
+insert_authorized_senders(VERIFIED_SENDERS)
