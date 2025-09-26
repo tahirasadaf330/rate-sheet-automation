@@ -27,7 +27,7 @@ from dotenv import load_dotenv
 from urllib.parse import quote
 # from open_ai import validate_subject_openai
 
-from valid_emails import VERIFIED_SENDERS  # list of allowed sender emails
+from valid_emails import get_verified_senders  # list of allowed sender emails
 
 # ========================= Debug Toggles =========================
 DEBUG = False         # ultra-verbose prints for every step
@@ -156,7 +156,7 @@ def dbg(*args, **kwargs):
 
 SCOPES = ["https://graph.microsoft.com/.default"]
 
-VERIFIED = {e.lower().strip() for e in VERIFIED_SENDERS}
+# VERIFIED = {e.lower().strip() for e in VERIFIED_SENDERS}
 
 # Where to store subjects that fail validation (next to this script)
 FAILED_SUBJECTS_PATH = Path(__file__).with_name("failed_subjects.json")
@@ -748,7 +748,7 @@ def log_failed_subject(sender_email: str, raw_subject: str) -> None:
 #_________________________________
 
 def process_inbox(session: requests.Session, user_email: str, after: Optional[str], before: Optional[str],
-                  page_size: int, allowed_exts: Set[str], attachments_base: str, unread_only: bool):
+                  page_size: int, allowed_exts: Set[str], attachments_base: str, unread_only: bool, verified_set: Set[str]):
     after_iso, before_iso = iso_range(after, before)
     url = build_messages_url(user_email, page_size, after_iso, before_iso, unread_only)
 
@@ -762,7 +762,7 @@ def process_inbox(session: requests.Session, user_email: str, after: Optional[st
 
     print(f"Query: after={after or '(none)'} | before={before or '(none)'} | page size={page_size} | unread_only={unread_only}")
     print(f"Allowed filetypes: {', '.join(sorted(allowed_exts))}")
-    print(f"Verified senders count: {len(VERIFIED)}")
+    print(f"Verified senders count: {len(verified_set)}")
     print("-" * 60)
 
     while url:
@@ -802,7 +802,7 @@ def process_inbox(session: requests.Session, user_email: str, after: Optional[st
                 continue
 
             # 2) unverified sender
-            if sender not in VERIFIED:
+            if sender not in verified_set:
                 print("  -> skip: sender NOT in VERIFIED_SENDERS")
                 skipped_sender += 1
                 try:
@@ -813,7 +813,7 @@ def process_inbox(session: requests.Session, user_email: str, after: Optional[st
                         "subject": subject,
                         "receivedDateTime": dt_str,
                         "logged_at_utc": datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
-                        "details": { "verified_list_size": len(VERIFIED) }
+                        "details": { "verified_list_size": len(verified_set) }
                     })
                 except Exception as e:
                     print(f"(warn) failed to update failed_emails.json: {e}", file=sys.stderr)
@@ -1069,6 +1069,10 @@ def process_inbox(session: requests.Session, user_email: str, after: Optional[st
 
 def verify_fetch_emails(after: str, before: str, unread_only: bool = True) -> None:
     cfg = load_env()
+
+    # build the verified set here (fresh every run)
+    verified_senders = get_verified_senders()              # fetch from DB
+    verified_set = {e.lower().strip() for e in verified_senders}
    
     page_size = 50                    # number of messages per API call
     filetypes = ".csv,.xlsx,.pdf"     # allowed file extensions
@@ -1084,9 +1088,9 @@ def verify_fetch_emails(after: str, before: str, unread_only: bool = True) -> No
     session = get_session(token)
 
     print(f"Querying Inbox for: {cfg['USER_EMAIL']}")
-    print(f"VERIFIED_SENDERS count: {len(VERIFIED)}")
+    print(f"VERIFIED_SENDERS count: {len(verified_set)}")
     if DEBUG:
-        print("VERIFIED_SENDERS sample:", list(sorted(VERIFIED))[:10], "..." if len(VERIFIED) > 10 else "")
+        print("VERIFIED_SENDERS sample:", list(sorted(verified_set))[:10], "..." if len(verified_set) > 10 else "")
 
     process_inbox(
         session=session,
@@ -1096,7 +1100,8 @@ def verify_fetch_emails(after: str, before: str, unread_only: bool = True) -> No
         page_size=page_size,
         allowed_exts=allowed_exts,
         attachments_base=attachments_dir,
-        unread_only=unread_only
+        unread_only=unread_only,
+        verified_set=verified_set
     )
 
 if __name__ == "__main__":
