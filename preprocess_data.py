@@ -259,7 +259,7 @@ def detect_header_row(raw: pd.DataFrame) -> int:
         cells = [x for x in row if pd.notna(x)]
         precleaned = [_preclean_header_token(x) for x in cells]
         normed = [_norm(x) for x in precleaned]
-        mapped = [ALIAS_MAP.get(n) for n in normed]
+        mapped = [ALIAS_MAP.get(n) or _match_alias_substring(n) for n in normed]
 
         covered = {m for m in mapped if m}
         ###################333
@@ -371,7 +371,6 @@ ALIAS_MAP = {
     'effectivedate': 'Effective Date',
     'efective_date': 'Effective Date',  
 
-
     # Billing Increment
     'billing_increment': 'Billing Increment',
     'billing_increament': 'Billing Increment',   # common typo
@@ -382,7 +381,47 @@ ALIAS_MAP = {
     'rounding_rules': 'Billing Increment',
     'rounding': 'Billing Increment',
     'billing_terms': 'Billing Increment',
+    'increment': 'Billing Increment',
 }
+
+##############################################
+# new code for handeling the junk that compes with the col names
+
+# --- Substring alias matching helpers ---
+def _normalize_header_key(s: str) -> str:
+    """
+    Lowercase, replace non-alphanumerics with underscores, collapse repeats,
+    and strip edges. Keeps behavior tight and predictable.
+    """
+    s = unicodedata.normalize('NFKC', str(s)).lower()
+    s = re.sub(r'[^0-9a-z]+', '_', s)
+    s = re.sub(r'_+', '_', s).strip('_')
+    return s
+
+# Build a normalized alias map once. Keys should already be "alias-style"
+# but this makes it robust to future edits.
+ALIAS_MAP_NORM = { _normalize_header_key(k): v for k, v in ALIAS_MAP.items() }
+
+def _match_alias_substring(normalized_key: str, alias_map: dict = ALIAS_MAP_NORM):
+    """
+    Try to map a normalized header by substring match against alias keys.
+    Returns canonical header string or None.
+    Preference order:
+      1) exact match
+      2) longest alias that is a substring of the key
+    """
+    # exact hit first
+    if normalized_key in alias_map:
+        return alias_map[normalized_key]
+
+    # substring hits, longest alias wins to avoid 'date' beating 'effective_date'
+    for alias in sorted(alias_map.keys(), key=len, reverse=True):
+        if alias and alias in normalized_key:
+            return alias_map[alias]
+    return None
+
+
+#################################################
 
 def _canonicalize_headers(df: pd.DataFrame) -> pd.DataFrame:
     original = list(df.columns)
@@ -394,7 +433,16 @@ def _canonicalize_headers(df: pd.DataFrame) -> pd.DataFrame:
     # 3) Strip currency words that survived normalization (e.g., rate_usd -> rate)
     key_map = {c: _strip_currency_words_from_key(norm_map[c]) for c in original}
     # 4) Alias lookup on the final key
-    alias_hit = {c: ALIAS_MAP.get(key_map[c]) for c in original}
+
+    alias_hit = {}
+    for c in original:
+        key = key_map[c]  # already precleaned+normalized version of c
+        hit = ALIAS_MAP.get(key)
+        if not hit:
+            # fallback: alias substring match on the normalized key
+            hit = _match_alias_substring(key)
+        alias_hit[c] = hit
+
 
     # DEBUG
     dbg("[canon] original -> preclean -> norm -> key_strip -> alias:")
@@ -627,8 +675,8 @@ def load_clean_rates(path: str, output_path: str, sheet=None) -> pd.DataFrame:
 
 # ──────────────────────────── quick test ─────────────────────────────────────
 if __name__ == '__main__':
-    FILE_PATH = r'C:\Users\User\OneDrive - Hayo Telecom, Inc\Documents\Work\Rate Sheet Automation\rate-sheet-automation\attachments to be compared\rates_at_alkaip.com_20250904_151710\R_A_HAYO_TELECOM_INC_090425.xlsx'
-    OUTPUT_FILE_PATH = r'test_files\hayotelecombilig_cleaned.xlsx'
+    FILE_PATH = r'C:\Users\User\OneDrive - Hayo Telecom, Inc\Documents\Work\Rate Sheet Automation\rate-sheet-automation\attachments_new\rates_at_voxmaster.com_20250925_112716\Standard_Full_Price_List_25.09.2025.xlsx'
+    OUTPUT_FILE_PATH = r'C:\Users\User\OneDrive - Hayo Telecom, Inc\Documents\Work\Rate Sheet Automation\rate-sheet-automation\attachments_new\rates_at_voxmaster.com_20250925_112716\Standard_Full_Price_List_25.09.2025_cleaned.xlsx'
     cleaned = load_clean_rates(FILE_PATH, OUTPUT_FILE_PATH, 0)
    
     print('✅ Cleaned and saved.')
