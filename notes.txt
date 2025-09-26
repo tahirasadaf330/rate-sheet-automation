@@ -10,33 +10,21 @@ Questions to ask
 
 the company name allip does not exist 
 
+some billing increment has values like 0/1/1 then we filter and keep the last 2 and it becomes 1/1
+but some rate sheets has values like this 1/1/0
+what should we do now should we change the logic to remove 0 or in some cases 0 is also there.
+
+
+does the code names remains same like in same as in the jerasoft or they kept changing like for now we are just fetching the code names from the
+jerasoft as the col name is consistent.
+
 
 ==================================
 
-New Changes to make
+issues
 
-1- Store the following details regarding each file in the meta data:
-total_rows, new, increased, decreased, unchanged, closed, backdated_increase, backdated_decrease, billing_increment_changes 
-(under key rate_summary(name of that attachment))
+some time the header is not getting red by the code if you open the file and expand thoes cols then it works check that stuff.
 
-see if you can add in here as a value in front of the file name: `` "attachments": [
-    "Bankai_Gold_56011_USD_9_.xlsx"
-  ],``
-
-2- Fetch the col name (code_name and add that too in the final resultant file)
-
-3- Add the billing_inrement col (old and new) in the resultant file
-
-4- Store the rejected emails in the seperate table
-two type of failed emails one failed due to subject or other issues and one failed due to comparision and email not in the verified sender list.
- 
-5- Take the authorized emails from the db instead of the script (low priority)
-
-
-
-
-
-Email not in the verified list.
-Subject fails
-Email has no attachments
-Extension not allowed like pdf or other
+-there is some calculate_dimension error fix that
+-plus jerasoft files are being returned empty check that too (C:\Users\User\OneDrive - Hayo Telecom, Inc\Documents\Work\Rate Sheet Automation\rate-sheet-automation\attachments_new\rates_at_airontel.com_20250911_161838)
+-add a new category in the failed emails which also shows the details regarding the files where email process has been incomplete let say preprocessing was not completed etc..
