@@ -586,16 +586,54 @@ def normalise_date_any(val) -> pd.Timestamp:
 
     return pd.NaT
 
+# def clean_billing_increment(val) -> str:
+#     if pd.isna(val):
+#         return ''
+#     nums = re.findall(r'\d+', str(val))
+#     if len(nums) == 1:
+#         n = int(nums[0]); return f"{n}/{n}"
+#     if len(nums) >= 2:
+#         a, b = int(nums[-2]), int(nums[-1])
+#         return f"{a}/{b}"
+#     return ''
+
 def clean_billing_increment(val) -> str:
+    """
+    Normalize vendor increments with the rule:
+      - If there are exactly two numbers -> keep as-is (no changes).
+      - If there are 3+ numbers and any zeros -> drop all zeros, then take the first two remaining.
+      - If only one number -> duplicate it (n/n).
+      - If nothing useful remains (all zeros, or empty) -> return ''.
+
+    Examples:
+      "0/1/1"   -> "1/1"
+      "1/0/60"  -> "1/60"
+      "60/60"   -> "60/60"     (unchanged)
+      "60"      -> "60/60"
+      "0/0/0"   -> ""
+    """
     if pd.isna(val):
         return ''
-    nums = re.findall(r'\d+', str(val))
-    if len(nums) == 1:
-        n = int(nums[0]); return f"{n}/{n}"
-    if len(nums) >= 2:
-        a, b = int(nums[-2]), int(nums[-1])
-        return f"{a}/{b}"
-    return ''
+    nums = [int(n) for n in re.findall(r'\d+', str(val))]
+
+    if not nums:
+        return ''
+
+    if len(nums) == 2:
+        # leave exactly-two-value cases untouched (per your spec)
+        return f"{nums[0]}/{nums[1]}"
+
+    if len(nums) >= 3:
+        # remove all zeros, then keep the first two remaining
+        nz = [n for n in nums if n != 0]
+        if len(nz) >= 2:
+            return f"{nz[0]}/{nz[1]}"
+        if len(nz) == 1:
+            return f"{nz[0]}/{nz[0]}"
+        return ''  # all zeros like "0/0/0"
+
+    # len(nums) == 1
+    return f"{nums[0]}/{nums[0]}"
 
 def load_clean_rates(path: str, output_path: str, sheet=None) -> pd.DataFrame:
     """
@@ -675,8 +713,8 @@ def load_clean_rates(path: str, output_path: str, sheet=None) -> pd.DataFrame:
 
 # ──────────────────────────── quick test ─────────────────────────────────────
 if __name__ == '__main__':
-    FILE_PATH = r'C:\Users\User\OneDrive - Hayo Telecom, Inc\Documents\Work\Rate Sheet Automation\rate-sheet-automation\attachments_new\rates_at_voxmaster.com_20250925_112716\Standard_Full_Price_List_25.09.2025.xlsx'
-    OUTPUT_FILE_PATH = r'C:\Users\User\OneDrive - Hayo Telecom, Inc\Documents\Work\Rate Sheet Automation\rate-sheet-automation\attachments_new\rates_at_voxmaster.com_20250925_112716\Standard_Full_Price_List_25.09.2025_cleaned.xlsx'
+    FILE_PATH = r'C:\Users\User\OneDrive - Hayo Telecom, Inc\Documents\Work\Rate Sheet Automation\rate-sheet-automation\attachments_new\Book1.xlsx'
+    OUTPUT_FILE_PATH = r'C:\Users\User\OneDrive - Hayo Telecom, Inc\Documents\Work\Rate Sheet Automation\rate-sheet-automation\attachments_new\Book1_cleaned.xlsx'
     cleaned = load_clean_rates(FILE_PATH, OUTPUT_FILE_PATH, 0)
    
     print('✅ Cleaned and saved.')

@@ -10,10 +10,8 @@ Questions to ask
 
 the company name allip does not exist 
 
-some billing increment has values like 0/1/1 then we filter and keep the last 2 and it becomes 1/1
-but some rate sheets has values like this 1/1/0
-what should we do now should we change the logic to remove 0 or in some cases 0 is also there.
-
+right now we are removing the the zero if there are three billing increment
+values like 1/0/1 it will become 1/1 etc.. is it valid?
 
 does the code names remains same like in same as in the jerasoft or they kept changing like for now we are just fetching the code names from the
 jerasoft as the col name is consistent.
