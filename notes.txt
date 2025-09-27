@@ -19,6 +19,21 @@ jerasoft as the col name is consistent.
 
 ==================================
 
+to do
+
+- add two methods like if the data fetched by one excel file read method is too tiny or 
+the column are not detected properly then it should fallback to the other one by default.
+
+- add one more category in the failed emails which will show failed processed like
+in cases where the system failed to process an email due to following reasons
+
+> file cleaning failed
+> no data fetched from jerasoft (empty jerasoft file)
+> data fetched too short like 7-8 rows so system should show it infact put it as a seperate category what you say.
+
+
+===================================
+
 issues
 
 some time the header is not getting red by the code if you open the file and expand thoes cols then it works check that stuff.
