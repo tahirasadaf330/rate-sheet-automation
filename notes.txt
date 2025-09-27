@@ -26,3 +26,15 @@ some time the header is not getting red by the code if you open the file and exp
 -there is some calculate_dimension error fix that
 -plus jerasoft files are being returned empty check that too (C:\Users\User\OneDrive - Hayo Telecom, Inc\Documents\Work\Rate Sheet Automation\rate-sheet-automation\attachments_new\rates_at_airontel.com_20250911_161838)
 -add a new category in the failed emails which also shows the details regarding the files where email process has been incomplete let say preprocessing was not completed etc..
+
+
+
+
+==============================
+
+
+future considerations
+
+set alerts that will show up on dashboards if there is an issue like too much of 
+data or too less or the file from jerasoft is fetched empty which can tell the 
+rate team to manaually handle the case.
