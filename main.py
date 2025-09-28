@@ -107,6 +107,7 @@ def process_all_directories(attachments_base="attachments"):
             print(info)
 
             if isinstance(info, str):
+                # Export failed with a message returned by export_rates_by_query
                 print(f"[ERROR] Export failed for {company}: {info}")
                 meta["keyword_error"] = info
                 with open(meta_file, "w", encoding="utf-8") as f:
@@ -114,10 +115,34 @@ def process_all_directories(attachments_base="attachments"):
                 print(f"[INFO] Updated metadata with keyword_error: {meta_file}")
 
             else:
+                # Export succeeded; update metadata and also check row count of the saved file
                 print(f"[INFO] Export succeeded for {company}, updating metadata.")
 
                 if info:
                     meta["best_table_name"] = info.get("best_table_name")
+
+                # --- Count rows in the saved JeraSoft file and set human-eval flags ---
+                rows_js = 0
+                try:
+                    out_ext = Path(output_path).suffix.lower()
+                    if out_ext in (".xlsx", ".xls"):
+                        df_js = pd.read_excel(output_path)
+                        rows_js = int(df_js.shape[0])
+                    elif out_ext == ".csv":
+                        df_js = pd.read_csv(output_path)
+                        rows_js = int(df_js.shape[0])
+                    else:
+                        print(f"[WARN] Unrecognized JeraSoft output extension: {out_ext}")
+                except Exception as e2:
+                    print(f"[WARN] Could not read exported JeraSoft file for row count: {e2}")
+
+                # Record details and sticky flag
+                meta["human_eval_details_jerasoft"] = {
+                    "file": Path(output_path).name,
+                    "rows": rows_js,
+                }
+                meta["need_human_eval_jerasoft"] = bool(meta.get("need_human_eval_jerasoft")) or (rows_js < 100)
+                # ---------------------------------------------------------------------
 
                 # Only mark true if the export call didn’t blow up
                 meta["jerasoft_preprocessed"] = True
@@ -213,11 +238,24 @@ def clean_preprocessed_folders(attachments_dir: str | Path):
                 in_path = str(file_path)
                 out_path = str(file_path)   # same path -> overwrite in place
                 print(f"  - Cleaning: {file_path.name}")
-                load_clean_rates(in_path, out_path, 0)
+                cleaned_df = load_clean_rates(in_path, out_path, 0)
                 files_done += 1
                 print(f"    ✔ cleaned -> {file_path}")
                 # Update metadata with successful cleaning result
                 metadata["preprocessed_results"][file_path.name] = True
+
+                # NEW: flag tiny outputs for human review
+                try:
+                    row_count = int(cleaned_df.shape[0])
+                except Exception:
+                    row_count = 0  # be safe if something odd is returned
+
+                # keep a per-file detail (handy for debugging)
+                metadata.setdefault("human_eval_details_pre", {})[file_path.name] = {"rows": row_count}
+
+                # set a top-level flag; never turn a prior True back to False
+                metadata["need_human_eval_pre"] = bool(metadata.get("need_human_eval_pre")) or (row_count < 100)
+
             except Exception as e:
                 print(f"    ✖ failed cleaning {file_path.name}: {e}")
                 # Update metadata with failure result
@@ -781,6 +819,7 @@ def push_all_ok_results(attachments_root: str | Path) -> Tuple[int, int, int]:
         except Exception as e:
             print(f"  ✖ Failed to create rate_upload row: {e}")
             # mark only not-yet-pushed files as failed
+            rp = meta.get("results_pushed") or {} 
             for f in result_files:
                 if rp.get(f.name) is True:
                     continue
