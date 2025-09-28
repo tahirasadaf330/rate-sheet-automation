@@ -21,6 +21,8 @@ jerasoft as the col name is consistent.
 
 to do
 
+- new issue spotted you might have to define a different process for the jerasoft file cleaning.
+
 - also reinstall the requirements file on the server too.
 
 - add two methods like if the data fetched by one excel file read method is too tiny or 

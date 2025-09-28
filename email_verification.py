@@ -77,12 +77,6 @@ def _load_failed_log() -> dict:
         print(f"(warn) could not read {FAILED_EMAILS_PATH}: {e}", file=sys.stderr)
     return json.loads(json.dumps(_FAILED_SCHEMA))
 
-# def _atomic_write_failed_log(data: dict) -> None:
-#     tmp = FAILED_EMAILS_PATH.with_suffix(FAILED_EMAILS_PATH.suffix + ".tmp")
-#     with open(tmp, "w", encoding="utf-8") as f:
-#         json.dump(data, f, ensure_ascii=False, indent=2)
-#     os.replace(tmp, FAILED_EMAILS_PATH)
-
 def _recalc_totals_inplace(data: dict) -> None:
     buckets = data.get("buckets", {})
     totals  = data.get("totals", {})
@@ -97,13 +91,6 @@ def _atomic_write_failed_log(data: dict) -> None:
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
     os.replace(tmp, FAILED_EMAILS_PATH)
-
-
-# def _entry_exists(bucket: list, message_id: str) -> bool:
-#     for item in bucket:
-#         if item.get("id") == message_id or (message_id and item.get("internetMessageId") == message_id):
-#             return True
-#     return False
 
 def _entry_exists(bucket: list, key: Optional[str]) -> bool:
     if not key:
@@ -431,127 +418,6 @@ def strip_html(html: str) -> str:
 def message_sender(msg: dict) -> str:
     frm = (msg.get("from") or {}).get("emailAddress") or {}
     return (frm.get("address") or "").lower().strip()
-
-# def save_matching_attachments_for_user(session: requests.Session, user_email: str, msg_id: str,
-#                                        allowed_exts: Set[str], save_dir: str,
-#                                        max_bytes: int = 50*1024*1024, min_bytes: int = 1000
-#                                       ) -> Tuple[bool, int, int, List[str]]:
-#     """
-#     Download file attachments whose extension is in allowed_exts.
-#     Returns (saved_any, considered_count, skipped_count, saved_filenames).
-
-#     We first list with a safe $select, then GET each attachment to check @odata.type and contentBytes.
-#     """
-#     user_path = quote(user_email)
-#     list_url = (
-#         f"https://graph.microsoft.com/v1.0/users/{user_path}/messages/{quote(msg_id)}/attachments"
-#         "?$select=id,name,contentType,size"
-#     )
-
-#     saved = False
-#     considered = 0
-#     skipped = 0
-#     saved_files: List[str] = []
-
-#     if not DRY_RUN:
-#         os.makedirs(save_dir, exist_ok=True)
-#     else:
-#         dbg("DRY_RUN: would create dir", save_dir)
-
-#     url = list_url
-#     while url:
-#         dbg("Fetching attachments (list):", url)
-#         r = get_with_retries(session, url)
-#         if r.status_code != 200:
-#             try:
-#                 print("Attachment list error:", json.dumps(r.json(), indent=2), file=sys.stderr)
-#             except Exception:
-#                 print("Attachment list error text:", r.text[:2000], file=sys.stderr)
-#             r.raise_for_status()
-
-#         data = r.json()
-#         atts = data.get("value", [])
-#         dbg(f"[DEBUG] Attachments returned: {len(atts)}")
-
-#         for att in atts:
-#             considered += 1
-#             raw_name = att.get("name") or "attachment"
-#             filename = safe_filename(raw_name)
-#             _, ext = os.path.splitext(filename)
-#             size_meta = att.get("size")
-
-#             dbg(f"[DEBUG]   ATTACHMENT(list): name={raw_name} -> safe={filename} ext={ext} size(meta)={size_meta}")
-
-#             # Fetch full attachment
-#             att_id = att.get("id")
-#             if not att_id:
-#                 dbg("   -> skip: missing attachment id")
-#                 skipped += 1
-#                 continue
-
-#             att_url = f"https://graph.microsoft.com/v1.0/users/{user_path}/messages/{quote(msg_id)}/attachments/{quote(att_id)}"
-#             dbg("   GET attachment detail:", att_url)
-#             r2 = get_with_retries(session, att_url)
-#             if r2.status_code != 200:
-#                 try:
-#                     print("Attachment fetch error:", json.dumps(r2.json(), indent=2), file=sys.stderr)
-#                 except Exception:
-#                     print("Attachment fetch error text:", r2.text[:2000], file=sys.stderr)
-#                 skipped += 1
-#                 continue
-
-#             fatt = r2.json()
-#             otype = fatt.get("@odata.type", "")
-#             dbg("   detail @odata.type:", otype)
-
-#             if "fileAttachment" not in otype:
-#                 dbg("   -> skip: not a fileAttachment")
-#                 skipped += 1
-#                 continue
-
-#             if ext.lower() not in allowed_exts:
-#                 dbg(f"   -> skip: extension {ext.lower()} not in allowed {allowed_exts}")
-#                 skipped += 1
-#                 continue
-
-#             b64 = fatt.get("contentBytes")
-#             if not b64:
-#                 dbg("   -> skip: no contentBytes on fileAttachment")
-#                 skipped += 1
-#                 continue
-
-#             try:
-#                 blob = base64.b64decode(b64)
-#             except Exception as e:
-#                 dbg("   -> skip: base64 decode failed:", repr(e))
-#                 skipped += 1
-#                 continue
-
-#             sz = len(blob)
-#             dbg(f"   contentBytes size={sz}")
-#             if sz < min_bytes:
-#                 dbg(f"   -> skip: size {sz} < min_bytes {min_bytes}")
-#                 skipped += 1
-#                 continue
-#             if sz > max_bytes:
-#                 print(f"   ↳ skipped {filename}: {sz} bytes exceeds limit")
-#                 skipped += 1
-#                 continue
-
-#             path = unique_path(save_dir, filename)
-#             if DRY_RUN:
-#                 dbg("   -> DRY_RUN: would save to", path)
-#             else:
-#                 with open(path, "wb") as f:
-#                     f.write(blob)
-#                 print(f"   ↳ saved attachment: {path}")
-#                 saved_files.append(os.path.basename(path))
-#             saved = True
-
-#         url = data.get("@odata.nextLink")
-#         dbg("Next attachments page?", bool(url))
-
-#     return saved, considered, skipped, saved_files
 
 def save_matching_attachments_for_user(session: requests.Session, user_email: str, msg_id: str,
                                        allowed_exts: Set[str], save_dir: str,
@@ -924,101 +790,6 @@ def process_inbox(session: requests.Session, user_email: str, after: Optional[st
                 except Exception as e:
                     print(f"(warn) failed to update failed_emails.json: {e}", file=sys.stderr)
                 continue
-
-        # # Process messages newest → oldest (already ordered desc)
-        # for i, m in enumerate(items, 1):
-        #     msg_id = m.get("id")
-        #     sender = message_sender(m)
-        #     subject = m.get("subject") or ""
-        #     dt_str = m.get("receivedDateTime") or ""
-        #     has_attachments = bool(m.get("hasAttachments"))
-        #     is_unread = not m.get("isRead")
-
-        #     print(f"\n[{i}/{page_count}] MSG id={msg_id}")
-        #     print(f"  receivedDateTime: {dt_str}")
-        #     print(f"  from: {sender}")
-        #     print(f"  subject: {subject}")
-        #     print(f"  is_unread: {is_unread} | has_attachments: {has_attachments}")
-
-        #     if unread_only and not is_unread:
-        #         print("  -> skip: message is read but unread_only=True")
-        #         skipped_read += 1
-        #         continue
-
-        #     if sender not in VERIFIED:
-        #         print("  -> skip: sender NOT in VERIFIED_SENDERS")
-        #         skipped_sender += 1
-        #         continue
-
-        #     parsed = validate_subject(subject)  # fast regex path
-        #     source = "regex"
-
-        #     # if not parsed:
-        #     #     source = "openai"
-        #     #     try:
-        #     #         time.sleep(7)  # to avoid rate limits
-        #     #         parsed = validate_subject_openai(subject)  # RAW subject, not normalized
-        #     #     except Exception as e:
-        #     #         print(f"  -> skip: LLM fallback crashed: {e}")
-        #     #         parsed = None
-
-        #     # if not parsed:
-        #     #     print(f"  -> skip: subject does not match required fields: {subject!r}")
-        #     #     skipped_subject += 1
-        #     #     continue
-         
-        #     if not parsed:
-        #         print(f"  -> skip: subject does not match required fields: {subject!r}")
-        #         try:
-        #             log_failed_subject(sender, subject)
-        #         except Exception as e:
-        #             print(f"  (warn) failed to log failed subject: {e}", file=sys.stderr)
-        #         skipped_subject += 1
-        #         continue
-
-        #     if not has_attachments:
-        #         print("  -> skip: no attachments (hasAttachments=False)")
-        #         skipped_no_attach += 1
-        #         continue
-
-        #     matched_messages += 1
-
-        #     # Directory name from sender + UTC timestamp
-        #     try:
-        #         dt = datetime.fromisoformat(dt_str.replace("Z","+00:00"))
-        #     except Exception as e:
-        #         dbg("datetime parse failed:", repr(e), "raw:", dt_str)
-        #         dt = datetime.now(timezone.utc)
-        #     date_time_str = dt.astimezone(timezone.utc).strftime('%Y%m%d_%H%M%S')
-        #     date_only = dt.astimezone(timezone.utc).strftime('%Y-%m-%d')
-        #     time_only = dt.astimezone(timezone.utc).strftime('%H:%M:%S')
-        #     safe_sender = sender.replace('@', '_at_')
-        #     save_dir = os.path.join(attachments_base, f"{safe_sender}_{date_time_str}")
-        #     print("  save_dir:", save_dir)
-
-        #     # Skip if directory already exists (idempotent)
-        #     if os.path.isdir(save_dir):
-        #         print("  -> skip: directory already exists, assuming this message was processed before")
-        #         skipped_existing_dir += 1
-        #         continue
-
-        #     # Save attachments
-        #     saved_any, considered_count, skipped_count, saved_files = save_matching_attachments_for_user(
-        #         session, user_email, msg_id, allowed_exts, save_dir
-        #     )
-        #     print(f"  attachments considered: {considered_count} | skipped: {skipped_count} | saved_any={saved_any}")
-
-        #     if not saved_any:
-        #         print("  -> skip: no attachment passed extension/size checks")
-        #         skipped_ext += 1
-        #         # Cleanup empty directory if created
-        #         try:
-        #             if os.path.isdir(save_dir) and not os.listdir(save_dir):
-        #                 os.rmdir(save_dir)
-        #                 dbg("  (cleanup) removed empty dir:", save_dir)
-        #         except Exception:
-        #             pass
-        #         continue
 
             # Fetch body text (optional for logs)
             body_text = fetch_message_body_text(session, user_email, msg_id)

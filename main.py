@@ -23,10 +23,11 @@ from pathlib import Path
 from preprocess_data import load_clean_rates
 from typing import Iterable, Tuple, Optional, Dict, Any, List
 from datetime import datetime, timezone
-from database import insert_rate_upload, bulk_insert_rate_upload_details, replace_rejected_emails_metadata
+from database import insert_rate_upload, bulk_insert_rate_upload_details, replace_rejected_emails_metadata, push_failed_emails_json_to_db
 import pandas as pd
 from typing import Any 
 from valid_emails import refresh_verified_senders
+
 
  
 FAILED_EMAILS_PATH = Path(__file__).with_name("failed_emails.json")
@@ -278,6 +279,8 @@ def clean_preprocessed_folders(attachments_dir: str | Path):
 
 clean_preprocessed_folders("attachments")
 
+
+
 #________________ Ratesheet Comparision Script _____________
 
 ALLOWED_EXTS = {".xlsx", ".xls", ".csv"}
@@ -517,6 +520,132 @@ def compare_preprocessed_folders(
 
 compare_preprocessed_folders("attachments", notice_days=7, rate_tol=0.0001)  #check the difference upto 4 decimal places.
 
+###############################################
+
+from database import insert_rejected_email_row  # add this import at the top with others
+
+def push_rejections_from_metadata(attachments_root: str | Path) -> tuple[int, int]:
+    """
+    Scan each attachments/<folder>/metadata.json and, if not already_pushed,
+    insert one row into rejected_emails based on the first applicable condition:
+      1) jerasoft_preprocessed == False  -> 'jerasoft_error'
+      2) need_human_eval_jerasoft == True -> 'need_human_eval_jerasoft'
+      3) any preprocessed_results entry == False -> 'preprocessing_error'
+      4) need_human_eval_pre == True -> 'need_human_eval_preprocessing'
+
+    After a successful insert, mark metadata['already_pushed'] = True.
+
+    Returns: (folders_scanned, rows_inserted)
+    """
+    root = Path(attachments_root).expanduser().resolve()
+    if not root.exists():
+        raise FileNotFoundError(f"Attachments directory not found: {root}")
+
+    scanned = 0
+    inserted = 0
+
+    for child in sorted(root.iterdir()):
+        if not child.is_dir():
+            continue
+        meta_path = child / "metadata.json"
+        if not meta_path.exists():
+            continue
+
+        scanned += 1
+
+        try:
+            with meta_path.open("r", encoding="utf-8") as f:
+                meta = json.load(f)
+        except Exception as e:
+            print(f"(warn) cannot read {meta_path}: {e}")
+            continue
+
+        # skip if already pushed
+        if bool(meta.get("already_pushed")) is True:
+            continue
+
+        sender = (meta.get("sender") or "").strip() or None
+        subject = (meta.get("subject") or "").strip() or None
+        received_at = _parse_iso_utc_safe(meta.get("receivedDateTime_raw"))
+        processed_at = _parse_iso_utc_safe(meta.get("processed_at_utc"))
+
+        # Decide category & notes (first match wins)
+        category = None
+        notes = None
+
+        # 1) JeraSoft export failed/not done
+        jp = meta.get("jerasoft_preprocessed")
+        if jp is False or jp is None:
+            category = "jerasoft_error"
+            ke = meta.get("keyword_error")
+            best = meta.get("best_table_name")
+            bits = ["JeraSoft export did not complete (jerasoft_preprocessed is false/missing)."]
+            if ke:
+                bits.append(f"keyword_error: {ke}")
+            if best:
+                bits.append(f"best_table_name (last known): {best}")
+            notes = " ".join(bits)
+
+        # 2) JeraSoft needs human review: row count < 100
+        if not category and bool(meta.get("need_human_eval_jerasoft")):
+            category = "need_human_eval_jerasoft"
+            det = meta.get("human_eval_details_jerasoft") or {}
+            file_name = det.get("file")
+            rows = det.get("rows")
+            notes = f"JeraSoft export appears too small (<100 rows). File={file_name or 'unknown'}, rows={rows if rows is not None else 'unknown'}."
+
+        # 3) Preprocessing had failures
+        if not category:
+            pr = meta.get("preprocessed_results") or {}
+            failed = [name for name, ok in pr.items() if ok is False]
+            if failed:
+                category = "preprocessing_error"
+                notes = "Preprocessing failed for: " + ", ".join(failed)
+
+        # 4) Vendor files need human review: small outputs
+        if not category and bool(meta.get("need_human_eval_pre")):
+            category = "need_human_eval_preprocessing"
+            det = meta.get("human_eval_details_pre") or {}
+            # det looks like { "fileA.xlsx": {"rows": n}, ... }
+            parts = []
+            for k, v in det.items():
+                try:
+                    parts.append(f"{k}={int((v or {}).get('rows', 0))} rows")
+                except Exception:
+                    parts.append(f"{k}=unknown rows")
+            joined = ", ".join(parts) if parts else "no detail"
+            notes = f"Preprocessing produced small outputs (<100 rows): {joined}."
+
+        # If nothing to report, skip
+        if not category:
+            continue
+
+        # Insert into DB
+        try:
+            new_id = insert_rejected_email_row(
+                sender_email=sender,
+                subject=subject,
+                category=category,
+                notes=notes,
+                received_at=received_at,
+                processed_at=processed_at,
+            )
+            print(f"(ok) rejected_emails id={new_id} ← {child.name} [{category}]")
+            inserted += 1
+        except Exception as e:
+            print(f"(warn) failed inserting rejected_emails for {child.name}: {e}")
+            continue
+
+        # Mark as already pushed and persist
+        try:
+            meta["already_pushed"] = True
+            _atomic_write_json(meta_path, meta)
+        except Exception as e:
+            print(f"(warn) failed to mark already_pushed in {meta_path}: {e}")
+
+    print(f"\n=== Rejections from metadata ===\nFolders scanned: {scanned}\nRows inserted: {inserted}\n")
+    return scanned, inserted
+
 #________________ Database Script _____________
 
 ATTACHMENTS_ROOT = "attachments"
@@ -525,6 +654,21 @@ _ALLOWED_EXTS = {".xlsx", ".xls", ".csv"}
 EXPECTED_COLS = ["Code", "Old Rate", "New Rate", "Effective Date", "Status", "Change Type", "Notes"]
 
 # ------------ metadata helpers ------------
+
+def _parse_iso_utc_safe(s: Optional[str]) -> Optional[datetime]:
+    if not s or not isinstance(s, str):
+        return None
+    try:
+        return datetime.fromisoformat(s.replace("Z", "+00:00"))
+    except Exception:
+        return None
+
+def _atomic_write_json(path: Path, data: dict) -> None:
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    with tmp.open("w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, path)
+
 
 def load_metadata(folder: Path) -> Optional[Dict[str, Any]]:
     meta = folder / "metadata.json"
@@ -642,28 +786,18 @@ def read_comparison_table(path: Path) -> pd.DataFrame:
     df.dropna(how="all", inplace=True)
     return df
 
-# def df_to_detail_dicts(df: pd.DataFrame) -> List[Dict[str, Any]]:
-#     details: List[Dict[str, Any]] = []
-#     for _, r in df.iterrows():
-#         eff = r["Effective Date"]
-#         eff_py = None if pd.isna(eff) else eff.to_pydatetime()  # tz-aware UTC
-#         details.append({
-#             "dst_code": None if pd.isna(r["Code"]) else str(r["Code"]).strip(),
-#             "rate_existing": None if pd.isna(r["Old Rate"]) else float(r["Old Rate"]),
-#             "rate_new": None if pd.isna(r["New Rate"]) else float(r["New Rate"]),
-#             "effective_date": eff_py,
-#             "change_type": None if pd.isna(r["Change Type"]) else str(r["Change Type"]).strip(),
-#             "status": None if pd.isna(r["Status"]) else str(r["Status"]).strip(),
-#             "notes": None if pd.isna(r["Notes"]) else str(r["Notes"]).strip(),
-#         })
-#     return details
-
 def df_to_detail_dicts(df: pd.DataFrame) -> List[Dict[str, Any]]:
     details: List[Dict[str, Any]] = []
+
+    has_old_bi   = "Old Billing Increment" in df.columns
+    has_new_bi   = "New Billing Increment" in df.columns
+    has_code_name = "Code Name" in df.columns
+
     for _, r in df.iterrows():
         eff = r["Effective Date"]
         eff_py = None if pd.isna(eff) else eff.to_pydatetime()  # tz-aware UTC
-        details.append({
+
+        item: Dict[str, Any] = {
             "dst_code": None if pd.isna(r["Code"]) else str(r["Code"]).strip(),
             "rate_existing": None if pd.isna(r["Old Rate"]) else float(r["Old Rate"]),
             "rate_new": None if pd.isna(r["New Rate"]) else float(r["New Rate"]),
@@ -671,109 +805,22 @@ def df_to_detail_dicts(df: pd.DataFrame) -> List[Dict[str, Any]]:
             "change_type": None if pd.isna(r["Change Type"]) else str(r["Change Type"]).strip(),
             "status": None if pd.isna(r["Status"]) else str(r["Status"]).strip(),
             "notes": None if pd.isna(r["Notes"]) else str(r["Notes"]).strip(),
-            "old_billing_increment": None if pd.isna(r["Old Billing Increment"]) else float(r["Old Billing Increment"]),
-            "new_billing_increment": None if pd.isna(r["New Billing Increment"]) else float(r["New Billing Increment"]),
-            "code_name": None if pd.isna(r["Code Name"]) else str(r["Code Name"]).strip(),
-        })
+        }
+
+        # Optional extras (only if present)
+        if has_old_bi:
+            v = r.get("Old Billing Increment")
+            item["old_billing_increment"] = None if pd.isna(v) else str(v).strip()
+        if has_new_bi:
+            v = r.get("New Billing Increment")
+            item["new_billing_increment"] = None if pd.isna(v) else str(v).strip()
+        if has_code_name:
+            v = r.get("Code Name")
+            item["code_name"] = None if pd.isna(v) else str(v).strip()
+
+        details.append(item)
+
     return details
-
-# ------------ main pipeline ------------
-
-# def push_all_ok_results(attachments_root: str | Path) -> Tuple[int, int, int]:
-#     """
-#     For each folder whose metadata compar(i)son_result.result == 'ok':
-#       - insert into rate_uploads (sender, received_at)
-#       - read every file ending with *_comparision_result.{xlsx|xls|csv}
-#       - bulk insert rows into rate_upload_details
-#       - update metadata.json -> results_pushed[filename] = True/False
-#     Returns: (folders_processed, files_processed, rows_inserted_total)
-#     """
-#     root = Path(attachments_root).expanduser().resolve()
-#     if not root.exists():
-#         raise FileNotFoundError(f"Attachments directory not found: {root}")
-
-#     folders_done = 0
-#     files_done = 0
-#     rows_total = 0
-
-#     print("\n=== DB push over OK comparison-result folders ===")
-#     for child in sorted(root.iterdir()):
-#         if not child.is_dir():
-#             continue
-
-#         meta = load_metadata(child)
-#         if not meta or not comparison_result_ok(meta):
-#             continue
-
-#         result_files = find_result_files(child)
-#         if not result_files:
-#             continue
-
-#         # Only push files for vendors that compare stage marked True
-#         comp = (meta.get("comparision_result") or meta.get("comparison_result") or {})
-#         ok_vendor_stems = {Path(k).stem for k, v in comp.items() if k != "result" and v is True}
-
-#         def _vendor_stem_from_result_file(p: Path) -> str:
-#             s = p.stem
-#             suf = "_comparision_result"
-#             return s[:-len(suf)] if s.endswith(suf) else s
-
-#         result_files = [f for f in result_files if _vendor_stem_from_result_file(f) in ok_vendor_stems]
-#         if not result_files:
-#             continue
-
-#         rp = meta.get("results_pushed") or {}
-#         already_all = result_files and all(rp.get(f.name) is True for f in result_files)
-#         if already_all:
-#             print(f"  [SKIP] all results already pushed for {child.name}")
-#             continue
-
-#         folders_done += 1
-#         print(f"\n[FOLDER] {child}")
-
-#         sender = str(meta.get("sender") or "").strip()
-#         received_at = parse_received_at(meta)
-
-#         try:
-#             upload_id = insert_rate_upload(sender_email=sender or None, received_at=received_at)
-#         except Exception as e:
-#             print(f"  ✖ Failed to create rate_upload row: {e}")
-#             # mark only not-yet-pushed files as failed
-#             for f in result_files:
-#                 if rp.get(f.name) is True:
-#                     continue
-#                 mark_results_pushed(child, f.name, False)
-#             continue
-
-#         # per-file skip for already-pushed
-#         rp = meta.get("results_pushed") or {}
-#         for f in result_files:
-#             if rp.get(f.name) is True:
-#                 print(f"  - Skipping already pushed: {f.name}")
-#                 continue
-
-#             print(f"  - Processing {f.name}")
-#             try:
-#                 df = read_comparison_table(f)
-#                 if df.empty:
-#                     print("    ⚠ empty comparison file; nothing to push")
-#                     mark_results_pushed(child, f.name, "empty file no results to push to the data base")
-#                     continue
-#                 details = df_to_detail_dicts(df)
-#                 inserted = bulk_insert_rate_upload_details(upload_id, details)
-#                 rows_total += inserted
-#                 files_done += 1
-#                 print(f"    ✔ inserted {inserted} rows")
-#                 mark_results_pushed(child, f.name, True)
-#             except Exception as e:
-#                 print(f"    ✖ failed to insert from {f.name}: {e}")
-#                 mark_results_pushed(child, f.name, False)
-
-#     print("\n=== DB push summary ===")
-#     print(f"Folders processed: {folders_done}")
-#     print(f"Files processed:   {files_done}")
-#     print(f"Rows inserted:     {rows_total}")
-#     return folders_done, files_done, rows_total
 
 def push_all_ok_results(attachments_root: str | Path) -> Tuple[int, int, int]:
     """
@@ -856,32 +903,11 @@ def push_all_ok_results(attachments_root: str | Path) -> Tuple[int, int, int]:
     print(f"Rows inserted:     {rows_total}")
     return folders_done, files_done, rows_total
 
-def push_rejected_emails_meta_after_run(path: Path = FAILED_EMAILS_PATH) -> None:
-    """
-    Read failed_emails.json (aggregate log) and push its JSON content
-    into the rejected_emails table via database.replace_rejected_emails_metadata().
-    Safe no-op if file is missing or unreadable.
-    """
-    try:
-        if not path.exists():
-            print(f"(info) {path} not found; skipping rejected_emails DB push.")
-            return
 
-        with path.open("r", encoding="utf-8") as f:
-            data = json.load(f)
 
-        if not isinstance(data, dict):
-            print(f"(warn) {path} did not contain a JSON object; skipping.")
-            return
-
-        # push to DB (this function truncates/clears then inserts)
-        inserted_id = replace_rejected_emails_metadata(data)
-        print(f"(ok) rejected_emails refreshed (row id={inserted_id}).")
-
-    except Exception as e:
-        print(f"(warn) failed to push rejected_emails metadata: {e}")
-
+push_rejections_from_metadata("attachments")
 
 push_all_ok_results(ATTACHMENTS_ROOT)
-push_rejected_emails_meta_after_run()
+# from database import push_failed_emails_json_to_db
+push_failed_emails_json_to_db("failed_emails.json")  # or leave empty to use default path
 

@@ -7,6 +7,7 @@ from datetime import datetime
 from decimal import Decimal
 import json
 from psycopg2.extras import execute_values, Json 
+from pathlib import Path
 
 # Load environment variables
 load_dotenv()
@@ -43,25 +44,196 @@ def insert_authorized_senders(emails):
         conn.commit()
         print(f"Inserted {cur.rowcount} new emails into authorized_senders.")
 
+
 # -----------------------------
-# 1) Insert into rate_uploads and RETURN id
+# Rejected emails (row-per-item) support
 # -----------------------------
-# def insert_rate_upload(sender_email: str, received_at: Optional[datetime] = None) -> int:
-#     """
-#     Insert a row into rate_uploads and return its id.
-#     """
-#     query = """
-#         INSERT INTO rate_uploads (sender_email, received_at, created_at, updated_at)
-#         VALUES (%s, COALESCE(%s, NOW()), NOW(), NOW())
-#         RETURNING id;
-#     """
-#     with get_conn() as conn, conn.cursor() as cur:
-#         cur.execute(query, (sender_email, received_at))
-#         rate_upload_id = cur.fetchone()[0]
-#         conn.commit()
-#         print(f"Inserted rate upload from {sender_email} → id={rate_upload_id}")
-#         return rate_upload_id
-    
+
+def _parse_iso_utc(s: Optional[str]) -> Optional[datetime]:
+    """
+    Parse an ISO timestamp like '2025-09-28T12:34:56Z' into a tz-aware UTC datetime.
+    Returns None if parsing fails or s is falsy.
+    """
+    if not s or not isinstance(s, str):
+        return None
+    try:
+        return datetime.fromisoformat(s.replace("Z", "+00:00"))
+    except Exception:
+        return None
+
+def insert_rejected_email(
+    sender_email: Optional[str],
+    subject: Optional[str],
+    category: str,
+    notes: Optional[str],
+    received_at: Optional[datetime],
+    processed_at: Optional[datetime],
+) -> int:
+    """
+    Insert a single rejected email row and return its id.
+    Table columns (managed by DB): id (PK), created_at, updated_at auto.
+    """
+    sql = """
+        INSERT INTO rejected_emails
+        (sender_email, subject, category, notes, received_at, processed_at, created_at, updated_at)
+        VALUES (%s, %s, %s, %s, %s, %s, NOW(), NOW())
+        RETURNING id;
+    """
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            sql,
+            (sender_email, subject, category, notes, received_at, processed_at),
+        )
+        new_id = cur.fetchone()[0]
+        conn.commit()
+        return new_id
+
+def _atomic_write_json(path: Path, data: Dict[str, Any]) -> None:
+    """Write JSON atomically to avoid corruption on crashes."""
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, path)
+
+from typing import Optional
+from datetime import datetime
+
+def insert_rejected_email_row(
+    *,
+    sender_email: Optional[str],
+    subject: Optional[str],
+    category: str,
+    notes: Optional[str],
+    received_at: Optional[datetime],
+    processed_at: Optional[datetime],
+) -> int:
+    """
+    Insert a single row into rejected_emails and return its id.
+
+    Schema (expected):
+      rejected_emails(
+        id SERIAL PK,
+        sender_email TEXT,
+        subject TEXT,
+        category TEXT,
+        notes TEXT,
+        received_at TIMESTAMPTZ,
+        processed_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    """
+    sql = """
+        INSERT INTO rejected_emails
+          (sender_email, subject, category, notes, received_at, processed_at, created_at, updated_at)
+        VALUES (%s, %s, %s, %s, %s, %s, NOW(), NOW())
+        RETURNING id;
+    """
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            sql,
+            (sender_email, subject, category, notes, received_at, processed_at),
+        )
+        new_id = cur.fetchone()[0]
+        conn.commit()
+        return new_id
+
+
+def push_failed_emails_json_to_db(path: Optional[str | Path] = None) -> tuple[int, int, int]:
+    """
+    Read failed_emails.json and insert any entries not yet pushed (no 'already_pushed': true)
+    into the rejected_emails table. After a successful insert, mark the JSON entry with
+    'already_pushed': true and atomically rewrite the JSON file.
+
+    Args:
+        path: path to failed_emails.json. If None, defaults to a file named
+              'failed_emails.json' next to this database.py.
+
+    Returns:
+        (inserted_count, skipped_already_pushed, errors)
+    """
+    json_path = Path(path) if path else Path(__file__).with_name("failed_emails.json")
+    if not json_path.exists():
+        print(f"(info) {json_path} not found; nothing to push.")
+        return (0, 0, 0)
+
+    try:
+        with open(json_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception as e:
+        print(f"(warn) could not read {json_path}: {e}")
+        return (0, 0, 1)
+
+    buckets = (data or {}).get("buckets") or {}
+    if not isinstance(buckets, dict):
+        print(f"(warn) malformed failed emails JSON: missing 'buckets' object")
+        return (0, 0, 1)
+
+    inserted = 0
+    skipped = 0
+    errors = 0
+
+    # Iterate all categories present in the file
+    for category, items in buckets.items():
+        if not isinstance(items, list):
+            continue
+
+        for entry in items:
+            try:
+                # Skip if already pushed
+                if bool(entry.get("already_pushed")):
+                    skipped += 1
+                    continue
+
+                sender_email = (entry.get("sender") or "").strip() or None
+                subject = (entry.get("subject") or "").strip() or None
+                received_at = _parse_iso_utc(entry.get("receivedDateTime"))
+                processed_at = _parse_iso_utc(entry.get("logged_at_utc"))
+
+                # Build a compact notes string that does not restate the category itself.
+                details = entry.get("details")
+                if details is None:
+                    notes = ""
+                else:
+                    # Keep it textual; avoid duplicating the category phrasing.
+                    # If details is large, truncate to keep row small.
+                    try:
+                        notes_full = json.dumps(details, ensure_ascii=False)
+                    except Exception:
+                        notes_full = str(details)
+                    notes = notes_full if len(notes_full) <= 2000 else (notes_full[:1970] + "...(truncated)")
+
+                # Insert row
+                _ = insert_rejected_email(
+                    sender_email=sender_email,
+                    subject=subject,
+                    category=str(category),
+                    notes=notes,
+                    received_at=received_at,
+                    processed_at=processed_at,
+                )
+                inserted += 1
+
+                # Mark as pushed in-memory
+                entry["already_pushed"] = True
+
+            except Exception as e:
+                errors += 1
+                print(f"(warn) failed to insert rejected email ({category}): {e}")
+
+    # Persist the updated JSON with the already_pushed flags
+    try:
+        _atomic_write_json(json_path, data)
+    except Exception as e:
+        # If this write fails, you've still inserted rows, but flags weren't saved.
+        # Next run may try to re-insert. Consider adding a uniqueness constraint if needed.
+        errors += 1
+        print(f"(warn) failed to update {json_path} with 'already_pushed' flags: {e}")
+
+    print(f"(ok) rejected_emails sync → inserted={inserted}, skipped={skipped}, errors={errors}")
+    return (inserted, skipped, errors)
+
+
 def insert_rate_upload(sender_email: str, received_at: Optional[datetime] = None, meta_data: Optional[Dict[str, Any]] = None) -> int:
     """
     Insert a row into rate_uploads and return its id.
@@ -82,57 +254,6 @@ def insert_rate_upload(sender_email: str, received_at: Optional[datetime] = None
 def _chunked(seq: List[tuple], size: int):
     for i in range(0, len(seq), size):
         yield seq[i:i+size]
-
-# def bulk_insert_rate_upload_details(
-#     rate_upload_id: int,
-#     details: Iterable[Dict[str, Any]],
-#     batch_size: int = 1000,   # tune as needed
-# ) -> int:
-#     """
-#     Bulk insert rows and return the TRUE total inserted count.
-#     Works even when execute_values paginates internally.
-#     """
-#     rows = [
-#         (
-#             rate_upload_id,
-#             d["dst_code"],
-#             d.get("rate_existing"),
-#             d.get("rate_new"),
-#             d.get("effective_date"),
-#             d.get("change_type"),
-#             d.get("status"),
-#             d.get("notes"),
-#         )
-#         for d in details
-#     ]
-#     if not rows:
-#         return 0
-
-#     sql = """
-#         INSERT INTO rate_upload_details
-#         (rate_upload_id, dst_code, rate_existing, rate_new, effective_date,
-#          change_type, status, notes, created_at, updated_at)
-#         VALUES %s
-#         RETURNING 1
-#     """
-#     tpl = "(%s,%s,%s,%s,%s,%s,%s,%s,NOW(),NOW())"
-
-#     total = 0
-#     with get_conn() as conn, conn.cursor() as cur:
-#         for chunk in _chunked(rows, batch_size):
-#             # Ensure a single statement per chunk by making page_size=len(chunk)
-#             try:
-#                 # psycopg2>=2.8 supports fetch=True: returns all RETURNING rows across pages
-#                 returned = execute_values(
-#                     cur, sql, chunk, template=tpl, page_size=len(chunk), fetch=True
-#                 )
-#                 total += len(returned) if returned is not None else 0
-#             except TypeError:
-#                 # Older psycopg2: no fetch kwarg. Use rowcount per chunk.
-#                 execute_values(cur, sql, chunk, template=tpl, page_size=len(chunk))
-#                 total += cur.rowcount  # count for this chunk (single statement)
-#         conn.commit()
-#     return total
 
 def bulk_insert_rate_upload_details(
     rate_upload_id: int,
@@ -185,26 +306,6 @@ def bulk_insert_rate_upload_details(
                 total += cur.rowcount  # count for this chunk (single statement)
         conn.commit()
     return total
-
-def replace_rejected_emails_metadata(meta_data: Dict[str, Any]) -> int:
-    """
-    Replace the contents of rejected_emails with a single row containing meta_data.
-    Returns the inserted row id.
-    """
-    delete_sql = "DELETE FROM rejected_emails;"
-    insert_sql = """
-        INSERT INTO rejected_emails (meta_data, created_at, updated_at)
-        VALUES (%s, NOW(), NOW())
-        RETURNING id;
-    """
-    with get_conn() as conn, conn.cursor() as cur:
-        # wipe previous rows
-        cur.execute(delete_sql)
-        # insert the new JSON (Json() ensures proper JSON/JSONB casting)
-        cur.execute(insert_sql, (Json(meta_data),))
-        new_id = cur.fetchone()[0]
-        conn.commit()
-        return new_id
     
 def fetch_authorized_sender_emails(active_only: bool = True) -> List[str]:
     """
@@ -240,7 +341,5 @@ def fetch_authorized_sender_emails(active_only: bool = True) -> List[str]:
             emails.append(e)
 
     return emails
-
-
 
 # insert_authorized_senders(VERIFIED_SENDERS)
