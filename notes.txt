@@ -21,6 +21,12 @@ jerasoft as the col name is consistent.
 
 to do
 
+2) (Optional) De-duplicate the “insert rejected email” function
+
+You’ve got both insert_rejected_email and insert_rejected_email_row that do the same thing. You can keep either one; if you want to standardize on
+
+-gpt highlighting issue in the read_comparison_table
+
 - new issue spotted you might have to define a different process for the jerasoft file cleaning.
 
 - also reinstall the requirements file on the server too.
