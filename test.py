@@ -14,7 +14,7 @@ ws.calculate_dimension()          # force a fresh scan of used range
 rows = list(ws.iter_rows(values_only=True)) # iterate actual cells
 df = pd.DataFrame(rows)
 
-df = pd.read_excel(path)
+# df = pd.read_excel(path)
 
 # trim empty padding
 df.dropna(how="all", inplace=True)

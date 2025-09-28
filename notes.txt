@@ -21,11 +21,14 @@ jerasoft as the col name is consistent.
 
 to do
 
+- also reinstall the requirements file on the server too.
+
 - add two methods like if the data fetched by one excel file read method is too tiny or 
-the column are not detected properly then it should fallback to the other one by default.
+the column are not detected properly then it should fallback to the other one by default. (implemented)
 
 - add one more category in the failed emails which will show failed processed like
-in cases where the system failed to process an email due to following reasons
+in cases where the system failed to process an email due to following reasons (take the details from the 
+metadata.json file)
 
 > file cleaning failed
 > no data fetched from jerasoft (empty jerasoft file)

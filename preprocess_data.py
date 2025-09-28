@@ -8,6 +8,9 @@ REQUIRED_COLS = [
     'Dst Code', 'Rate', 'Effective Date', 'Billing Increment'
 ]
 
+ROW_FALLBACK_THRESHOLD = 100  # trigger pandas fallback if streaming returns < 100 rows
+
+
 BILLING_PAIRS = [
     ('initial_period', 'recurring_period'),
     ('initial_period', 'subsequent_period'),
@@ -210,9 +213,70 @@ def _raw_from_ws(ws) -> pd.DataFrame:
     raw.reset_index(drop=True, inplace=True)
     return raw.astype("string")
 
+
+def _raw_from_excel_pandas(path: str, sheet) -> pd.DataFrame:
+    """
+    Read a sheet using pandas.read_excel so we bypass stale <dimension> metadata.
+    Returns a raw grid (no headers assigned), dropping all-empty rows/columns.
+    """
+    # Try calamine first (handles xlsx/xls fast), then fall back to openpyxl.
+    engines = ("calamine", "openpyxl")
+    last_exc = None
+    for eng in engines:
+        try:
+            df = pd.read_excel(path, sheet_name=sheet, engine=eng, header=None, dtype=object)
+            # Normalize to your raw-grid shape, like _raw_from_ws
+            df = pd.DataFrame(df)
+            df.dropna(how="all", inplace=True)
+            df.dropna(axis=1, how="all", inplace=True)
+            df.reset_index(drop=True, inplace=True)
+            return df.astype("string")
+        except Exception as e:
+            last_exc = e
+            continue
+    # If both engines failed, bubble up the last exception
+    raise last_exc if last_exc else RuntimeError("read_excel failed without an exception?")
+
+
+# def _read_raw_matrix(path: str, sheet=0) -> pd.DataFrame:
+#     ext = os.path.splitext(path)[1].lower()
+#     if ext in ('.xlsx', '.xlsm', '.xls'):
+#         wb = load_workbook(path, data_only=True, read_only=True)
+
+#         # try requested sheet first, then all others
+#         try_order = []
+#         if isinstance(sheet, int) and 0 <= sheet < len(wb.worksheets):
+#             try_order.append(sheet)
+#         elif isinstance(sheet, str):
+#             try_order += [i for i, ws in enumerate(wb.worksheets) if ws.title == sheet]
+
+#         try_order += [i for i in range(len(wb.worksheets)) if i not in try_order]
+
+#         for i in try_order:
+#             raw = _raw_from_ws(wb.worksheets[i])
+#             try:
+#                 _ = detect_header_row(raw)  # will raise if not found
+#                 return raw  # this sheet has the headers; use it
+#             except ValueError:
+#                 continue
+
+#         raise ValueError("No sheet contains all required headers.")
+#     else:
+#         return pd.read_csv(path, header=None, dtype=str)
+
+
 def _read_raw_matrix(path: str, sheet=0) -> pd.DataFrame:
     ext = os.path.splitext(path)[1].lower()
     if ext in ('.xlsx', '.xlsm', '.xls'):
+        # Optional: route legacy .xls straight to pandas, since openpyxl can't read BIFF .xls
+        if ext == '.xls':
+            try:
+                raw_pd = _raw_from_excel_pandas(path, sheet if sheet is not None else 0)
+                return raw_pd
+            except Exception:
+                # fall through to the openpyxl loop anyway, in case the file is misnamed
+                pass
+
         wb = load_workbook(path, data_only=True, read_only=True)
 
         # try requested sheet first, then all others
@@ -225,16 +289,35 @@ def _read_raw_matrix(path: str, sheet=0) -> pd.DataFrame:
         try_order += [i for i in range(len(wb.worksheets)) if i not in try_order]
 
         for i in try_order:
-            raw = _raw_from_ws(wb.worksheets[i])
+            raw_stream = _raw_from_ws(wb.worksheets[i])
+
+            # --- NEW: fallback trigger happens BEFORE header detection ---
+            chosen = raw_stream
+            if raw_stream.shape[0] < ROW_FALLBACK_THRESHOLD:
+                try:
+                    raw_pd = _raw_from_excel_pandas(path, i)  # same sheet index
+                    if raw_pd.shape[0] > raw_stream.shape[0]:
+                        dbg(f"[excel-fallback] streaming rows={raw_stream.shape[0]} < {ROW_FALLBACK_THRESHOLD}; "
+                            f"pandas rows={raw_pd.shape[0]} -> using pandas for sheet #{i}")
+                        chosen = raw_pd
+                    else:
+                        dbg(f"[excel-fallback] streaming rows={raw_stream.shape[0]} < {ROW_FALLBACK_THRESHOLD}; "
+                            f"pandas rows={raw_pd.shape[0]} not larger -> keeping streaming for sheet #{i}")
+                except Exception as e:
+                    dbg(f"[excel-fallback] pandas read failed on sheet #{i}: {e}")
+            # -------------------------------------------------------------
+
             try:
-                _ = detect_header_row(raw)  # will raise if not found
-                return raw  # this sheet has the headers; use it
+                _ = detect_header_row(chosen)  # will raise if not found
+                return chosen  # this sheet has the headers; use it
             except ValueError:
                 continue
+
 
         raise ValueError("No sheet contains all required headers.")
     else:
         return pd.read_csv(path, header=None, dtype=str)
+
 
 # ---- Header detection (instrumented) ----
 def detect_header_row(raw: pd.DataFrame) -> int:
@@ -262,13 +345,13 @@ def detect_header_row(raw: pd.DataFrame) -> int:
         mapped = [ALIAS_MAP.get(n) or _match_alias_substring(n) for n in normed]
 
         covered = {m for m in mapped if m}
-        ###################333
-         # NEW: if Billing Increment missing, satisfy it via known header pairs
+        ###################
+        # ---------- tolerate missing Billing Increment if related headers exist ----------
         if 'Billing Increment' not in covered:
             norm_set = set(normed)
 
-            # slightly "fuzzy" match so 'recurring_period_sec' still counts
             def _has_key(key: str) -> bool:
+                # fuzzy: exact, prefix, suffix, or underscore-delimited infix
                 return any(
                     n == key
                     or n.startswith(key + '_')
@@ -277,13 +360,20 @@ def detect_header_row(raw: pd.DataFrame) -> int:
                     for n in norm_set
                 )
 
-            pair_hit = any(_has_key(a) and _has_key(b) for a, b in BILLING_PAIRS)
-            if pair_hit:
+            # Pairs allow perfect synthesis later
+            pair_hit = any(_has_key(a) and _has_key(b) for (a, b) in BILLING_PAIRS)
+
+            # Singles are also enough, because _synthesize_billing_increment can duplicate a single
+            singles = ['initial_period', 'min_bill', 'first_increment', 'increment']
+            single_hit = any(_has_key(k) for k in singles)
+
+            if pair_hit or single_hit:
                 covered.add('Billing Increment')
 
-            # optional debug noise
-            print("  billing_pair_hit:", pair_hit, "pairs_checked:", BILLING_PAIRS)
-        ##################33333
+            dbg("  billing_pair_hit:", pair_hit, "singles_hit:", single_hit,
+                "pairs_checked:", BILLING_PAIRS, "singles_checked:", singles)
+        # -----------------------------------------------------------------------------
+        ##################
 
         missing = targets - covered
 
@@ -528,7 +618,13 @@ def trim_after_notes_and_strip_blank_above(df: pd.DataFrame) -> pd.DataFrame:
         return df
 
     # Build a normalized view for matching
-    norm = df.applymap(lambda x: "" if pd.isna(x) else str(x).strip())
+    # norm = df.applymap(lambda x: "" if pd.isna(x) else str(x).strip())
+
+    try:
+        norm = df.map(lambda x: "" if pd.isna(x) else str(x).strip())
+    except AttributeError:
+        norm = df.applymap(lambda x: "" if pd.isna(x) else str(x).strip())
+
 
     # Row-wise: does ANY cell start with a notes-like keyword?
     marker_mask = norm.apply(lambda r: any(_NOTES_RE.match(cell) for cell in r), axis=1)
@@ -555,6 +651,26 @@ def trim_after_notes_and_strip_blank_above(df: pd.DataFrame) -> pd.DataFrame:
     return df.iloc[:end_iloc + 1].copy()
 
 # ───────────────────────────────── helpers ──────────────────────────────────
+
+def _normalize_excel_writer_path(path: str) -> tuple[str, dict]:
+    """
+    Make writer extension predictable and attach the right engine.
+    - Lowercase xlsx/xlsm and use openpyxl.
+    - For .xls or unknown junk, upgrade to .xlsx and use openpyxl.
+    """
+    root, ext = os.path.splitext(path)
+    ext_low = ext.lower()
+    if ext_low in ('.xlsx', '.xlsm'):
+        return root + ext_low, {'engine': 'openpyxl'}
+    if ext_low == '.xls':
+        new_path = root + '.xlsx'
+        dbg(f"[writer] upgrading output extension from {ext} to .xlsx")
+        return new_path, {'engine': 'openpyxl'}
+    # no or weird extension → force .xlsx
+    new_path = (root if ext else path) + '.xlsx'
+    dbg(f"[writer] forcing .xlsx for unknown ext {ext or '(none)'}")
+    return new_path, {'engine': 'openpyxl'}
+
 
 def normalise_date_any(val) -> pd.Timestamp:
     """Return pandas.Timestamp (UTC-naive) or NaT if invalid."""
@@ -708,13 +824,14 @@ def load_clean_rates(path: str, output_path: str, sheet=None) -> pd.DataFrame:
     )
 
     # finally, write the cleaned sheet
-    df.to_excel(output_path, index=False)
+    out_path, writer_kwargs = _normalize_excel_writer_path(output_path)
+    df.to_excel(out_path, index=False, **writer_kwargs)
     return df
 
 # ──────────────────────────── quick test ─────────────────────────────────────
 if __name__ == '__main__':
-    FILE_PATH = r'C:\Users\User\OneDrive - Hayo Telecom, Inc\Documents\Work\Rate Sheet Automation\rate-sheet-automation\attachments_new\rate_at_qoolize.com_20250902_123633\Hayo_-_Premium_-_In_-Tech_Prefix__7013_-_02_Sep_2025.Xlsx'
-    OUTPUT_FILE_PATH = r'C:\Users\User\OneDrive - Hayo Telecom, Inc\Documents\Work\Rate Sheet Automation\rate-sheet-automation\attachments_new\rate_at_qoolize.com_20250902_123633\Hayo_-_Premium_-_In_-Tech_Prefix__7013_-_02_Sep_2025_cleaned.Xlsx'
+    FILE_PATH = r'C:\Users\User\OneDrive - Hayo Telecom, Inc\Documents\Work\Rate Sheet Automation\rate-sheet-automation\attachments_new\rate_at_qoolize.com_20250924_075853\Hayo_-_Premium_-_In_-Tech_Prefix__7013_-_24_Sep_2025.Xlsx'
+    OUTPUT_FILE_PATH = r'C:\Users\User\OneDrive - Hayo Telecom, Inc\Documents\Work\Rate Sheet Automation\rate-sheet-automation\attachments_new\rate_at_qoolize.com_20250924_075853\Hayo_-_Premium_-_In_-Tech_Prefix__7013_-_24_Sep_2025_cleaned.Xlsx'
     cleaned = load_clean_rates(FILE_PATH, OUTPUT_FILE_PATH, 0)
    
     print('✅ Cleaned and saved.')
