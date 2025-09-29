@@ -513,6 +513,83 @@ def _match_alias_substring(normalized_key: str, alias_map: dict = ALIAS_MAP_NORM
 
 #################################################
 
+# def _canonicalize_headers(df: pd.DataFrame) -> pd.DataFrame:
+#     original = list(df.columns)
+
+#     # 1) Preclean labels (kill $, €, USD, etc.)
+#     preclean_map = {c: _preclean_header_token(c) for c in original}
+#     # 2) Normalize
+#     norm_map = {c: _norm(preclean_map[c]) for c in original}
+#     # 3) Strip currency words that survived normalization (e.g., rate_usd -> rate)
+#     key_map = {c: _strip_currency_words_from_key(norm_map[c]) for c in original}
+#     # 4) Alias lookup on the final key
+
+#     alias_hit = {}
+#     for c in original:
+#         key = key_map[c]  # already precleaned+normalized version of c
+#         hit = ALIAS_MAP.get(key)
+#         if not hit:
+#             # fallback: alias substring match on the normalized key
+#             hit = _match_alias_substring(key)
+#         alias_hit[c] = hit
+
+
+#     # DEBUG
+#     dbg("[canon] original -> preclean -> norm -> key_strip -> alias:")
+#     for c in original:
+#         dbg(f"  {repr(c)}  ->  {repr(preclean_map[c])}  ->  {norm_map[c]}  ->  {key_map[c]}  ->  {alias_hit[c]}")
+#         if not alias_hit[c]:
+#             dbg("    codepoints(original):", _codepoints(c))
+
+#     # If alias matches, use canonical; otherwise keep the cleaned label
+#     mapped = {c: (alias_hit[c] if alias_hit[c] else preclean_map[c]) for c in original}
+#     df = df.rename(columns=mapped)
+
+#     # ---------- NEW: tolerate missing Billing Increment if a known pair exists ----------
+#     missing = [c for c in REQUIRED_COLS if c not in df.columns]
+
+#     if 'Billing Increment' in missing:
+#         # normalize the CURRENT df.columns (post-rename) for fuzzy matching
+#         normed_current = {_norm(_preclean_header_token(c)) for c in df.columns}
+
+#         def _has_key(key: str) -> bool:
+#             # fuzzy: exact, prefix, suffix, or underscore-delimited infix
+#             return any(
+#                 n == key or
+#                 n.startswith(key + '_') or
+#                 n.endswith('_' + key) or
+#                 ('_' + key + '_') in ('_' + n + '_')
+#                 for n in normed_current
+#             )
+
+#         pair_hit = any(_has_key(a) and _has_key(b) for (a, b) in BILLING_PAIRS)
+#         dbg("[canon] billing_pair_hit:", pair_hit, "pairs_checked:", BILLING_PAIRS)
+
+#         if pair_hit:
+#             # don’t count BI as missing; create placeholder so later selection won’t crash
+#             missing = [m for m in missing if m != 'Billing Increment']
+#             if 'Billing Increment' not in df.columns:
+#                 df['Billing Increment'] = ''   # _synthesize_billing_increment will fill this later
+#             dbg("[canon] Billing Increment satisfied via header pair; will synthesize values later.")
+#     # -----------------------------------------------------------------------------------
+
+#     # Final guard
+#     if missing:
+#         dbg("[canon] df.columns:", list(df.columns))
+#         dbg("[canon] missing required:", missing)
+#         dbg("[canon] precleaned originals:", preclean_map)
+#         dbg("[canon] normalized originals:", norm_map)
+#         dbg("[canon] stripped keys:", key_map)
+#         raise ValueError(
+#             "Missing required columns: "
+#             f"{missing}. Found headers: {original}. "
+#             f"Precleaned: {preclean_map}. "
+#             f"Normalized: {norm_map}. "
+#             f"Stripped keys: {key_map}. "
+#             "Add more variants to ALIAS_MAP or harden _norm/_preclean_header_token."
+#         )
+#     return df
+
 def _canonicalize_headers(df: pd.DataFrame) -> pd.DataFrame:
     original = list(df.columns)
 
@@ -526,13 +603,17 @@ def _canonicalize_headers(df: pd.DataFrame) -> pd.DataFrame:
 
     alias_hit = {}
     for c in original:
+        # Skip renaming for 'Dst Code Name'
+        if c.lower() == 'dst code name':
+            alias_hit[c] = 'Dst Code Name'
+            continue  # skip this column
+
         key = key_map[c]  # already precleaned+normalized version of c
         hit = ALIAS_MAP.get(key)
         if not hit:
             # fallback: alias substring match on the normalized key
             hit = _match_alias_substring(key)
         alias_hit[c] = hit
-
 
     # DEBUG
     dbg("[canon] original -> preclean -> norm -> key_strip -> alias:")
@@ -589,6 +670,9 @@ def _canonicalize_headers(df: pd.DataFrame) -> pd.DataFrame:
             "Add more variants to ALIAS_MAP or harden _norm/_preclean_header_token."
         )
     return df
+
+
+
 # ──────────────────────────────── footer ─────────────────────────────────
 
 # Customize the keywords if you want to add more
@@ -830,8 +914,8 @@ def load_clean_rates(path: str, output_path: str, sheet=None) -> pd.DataFrame:
 
 # ──────────────────────────── quick test ─────────────────────────────────────
 if __name__ == '__main__':
-    FILE_PATH = r'C:\Users\User\OneDrive - Hayo Telecom, Inc\Documents\Work\Rate Sheet Automation\rate-sheet-automation\attachments_new\rate_at_qoolize.com_20250924_075853\Hayo_-_Premium_-_In_-Tech_Prefix__7013_-_24_Sep_2025.Xlsx'
-    OUTPUT_FILE_PATH = r'C:\Users\User\OneDrive - Hayo Telecom, Inc\Documents\Work\Rate Sheet Automation\rate-sheet-automation\attachments_new\rate_at_qoolize.com_20250924_075853\Hayo_-_Premium_-_In_-Tech_Prefix__7013_-_24_Sep_2025_cleaned.Xlsx'
+    FILE_PATH = r'C:\Users\User\OneDrive - Hayo Telecom, Inc\Documents\Work\Rate Sheet Automation\rate-sheet-automation\attachments_new\rate_at_qoolize.com_20250902_123633\Hayo_-_Premium_-_In_-Tech_Prefix__7013_-_02_Sep_2025_jerasoft_comparison.xlsx'
+    OUTPUT_FILE_PATH = r'C:\Users\User\OneDrive - Hayo Telecom, Inc\Documents\Work\Rate Sheet Automation\rate-sheet-automation\attachments_new\rate_at_qoolize.com_20250902_123633\Hayo_-_Premium_-_In_-Tech_Prefix__7013_-_02_Sep_2025_jerasoft_comparison_cleaned.xlsx'
     cleaned = load_clean_rates(FILE_PATH, OUTPUT_FILE_PATH, 0)
    
     print('✅ Cleaned and saved.')

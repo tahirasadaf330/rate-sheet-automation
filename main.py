@@ -771,13 +771,17 @@ def read_comparison_table(path: Path) -> pd.DataFrame:
         elif n == "status": rename_map[c] = "Status"
         elif n == "change type": rename_map[c] = "Change Type"
         elif n == "notes": rename_map[c] = "Notes"
+        elif n == "old billing increment": rename_map[c] = "Old Billing Increment"
+        elif n == "new billing increment": rename_map[c] = "New Billing Increment"
+        elif n == "code name": rename_map[c] = "Code Name"
     df = df.rename(columns=rename_map)
 
+    # ensure required columns exist
     missing = [c for c in EXPECTED_COLS if c not in df.columns]
     if missing:
         raise ValueError(f"{path.name}: missing expected columns {missing}. Found: {list(df.columns)}")
 
-    df = df[EXPECTED_COLS].copy()
+    # Clean types but DO NOT drop optional columns
     df["Code"] = df["Code"].astype(str).str.strip()
     df = df[df["Code"].ne("")]  # drop empty codes
     df["Old Rate"] = pd.to_numeric(df["Old Rate"], errors="coerce")
@@ -822,6 +826,61 @@ def df_to_detail_dicts(df: pd.DataFrame) -> List[Dict[str, Any]]:
 
     return details
 
+def compute_upload_stats(dfs: List[pd.DataFrame]) -> Dict[str, int]:
+    """
+    Aggregate counts for the rate_uploads summary columns across all given DataFrames.
+    Assumes each df has at least the EXPECTED_COLS. Optional billing increment columns
+    will be used if present.
+    """
+    if not dfs:
+        return {
+            "total_rows": 0,
+            "new": 0, "increase": 0, "decrease": 0, "unchanged": 0, "closed": 0,
+            "backdated_increase": 0, "backdated_decrease": 0,
+            "billing_increment_changes": 0,
+        }
+
+    df = pd.concat(dfs, ignore_index=True)
+
+    s = df.get("Status", pd.Series([], dtype="object")).astype(str).str.strip().str.lower()
+    ct = df.get("Change Type", pd.Series([], dtype="object")).astype(str).str.strip().str.lower()
+
+    def count_status(name: str) -> int:
+        return int((s == name).sum())
+
+    total_rows = int(len(df))
+    new = count_status("new")
+    increase = count_status("increase")
+    decrease = count_status("decrease")
+    unchanged = count_status("unchanged")
+    closed = count_status("closed")
+
+    back_inc = int((((ct.str.contains("backdated", na=False)) & (ct.str.contains("increase", na=False))) |
+                (s == "backdated increase")).sum())
+    back_dec = int((((ct.str.contains("backdated", na=False)) & (ct.str.contains("decrease", na=False))) |
+                (s == "backdated decrease")).sum())
+
+    # billing increment changes if columns exist
+    bic = 0
+    if "Old Billing Increment" in df.columns or "New Billing Increment" in df.columns:
+        obi = df.get("Old Billing Increment")
+        nbi = df.get("New Billing Increment")
+        if obi is not None and nbi is not None:
+            bic = int((obi.astype(str).fillna("") != nbi.astype(str).fillna("")).sum())
+
+    return {
+        "total_rows": total_rows,
+        "new": new,
+        "increase": increase,
+        "decrease": decrease,
+        "unchanged": unchanged,
+        "closed": closed,
+        "backdated_increase": back_inc,
+        "backdated_decrease": back_dec,
+        "billing_increment_changes": bic,
+    }
+
+
 def push_all_ok_results(attachments_root: str | Path) -> Tuple[int, int, int]:
     """
     For each folder whose metadata compar(i)son_result.result == 'ok':
@@ -855,18 +914,41 @@ def push_all_ok_results(attachments_root: str | Path) -> Tuple[int, int, int]:
         if not result_files:
             continue
 
+        # Read all result files up-front for stats aggregation
+        all_dfs: List[pd.DataFrame] = []
+        for f in result_files:
+            try:
+                df_tmp = read_comparison_table(f)
+                if not df_tmp.empty:
+                    all_dfs.append(df_tmp)
+            except Exception as e:
+                print(f"    ⚠ failed reading {f.name} for stats aggregation: {e}")
+
+        stats_totals = compute_upload_stats(all_dfs)
+
+
         folders_done += 1
         print(f"\n[FOLDER] {child}")
 
         sender = str(meta.get("sender") or "").strip()
         received_at = parse_received_at(meta)
 
+        subject = (meta.get("subject") or "").strip() or None
+        processed_at = _parse_iso_utc_safe(meta.get("processed_at_utc"))
+        meta_data = meta.get("meta_data") 
+
         try:
-            upload_id = insert_rate_upload(sender_email=sender or None, received_at=received_at, meta_data=meta_data)
+            upload_id = insert_rate_upload(
+                sender_email=sender or None,
+                subject=subject,
+                received_at=received_at,
+                processed_at=processed_at,
+                totals=stats_totals,
+                meta_data=meta_data,
+            )
         except Exception as e:
             print(f"  ✖ Failed to create rate_upload row: {e}")
-            # mark only not-yet-pushed files as failed
-            rp = meta.get("results_pushed") or {} 
+            rp = meta.get("results_pushed") or {}
             for f in result_files:
                 if rp.get(f.name) is True:
                     continue

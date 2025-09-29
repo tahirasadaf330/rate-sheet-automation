@@ -9,6 +9,7 @@ import json
 from psycopg2.extras import execute_values, Json 
 from pathlib import Path
 
+
 # Load environment variables
 load_dotenv()
 
@@ -233,23 +234,75 @@ def push_failed_emails_json_to_db(path: Optional[str | Path] = None) -> tuple[in
     print(f"(ok) rejected_emails sync → inserted={inserted}, skipped={skipped}, errors={errors}")
     return (inserted, skipped, errors)
 
+def insert_rate_upload(
+    *,
+    sender_email: Optional[str],
+    subject: Optional[str],
+    received_at: Optional[datetime] = None,
+    processed_at: Optional[datetime] = None,
+    totals: Optional[Dict[str, int]] = None,
+    meta_data: Optional[Dict[str, Any]] = None,
+) -> int:
+    """
+    Insert one row into rate_uploads with summary counters.
 
-def insert_rate_upload(sender_email: str, received_at: Optional[datetime] = None, meta_data: Optional[Dict[str, Any]] = None) -> int:
+    rate_uploads columns covered:
+      subject, sender_email, received_at, processed_at,
+      total_rows, new, increase, decrease, unchanged, closed,
+      backdated_increase, backdated_decrease, billing_increment_changes, meta_data
     """
-    Insert a row into rate_uploads and return its id.
-    Insert meta_data into the rate_uploads table.
-    """
-    query = """
-        INSERT INTO rate_uploads (sender_email, received_at, created_at, updated_at, meta_data)
-        VALUES (%s, COALESCE(%s, NOW()), NOW(), NOW(), %s)
+    t = {
+        "total_rows": 0,
+        "new": 0,
+        "increase": 0,
+        "decrease": 0,
+        "unchanged": 0,
+        "closed": 0,
+        "backdated_increase": 0,
+        "backdated_decrease": 0,
+        "billing_increment_changes": 0,
+    }
+    if totals:
+        t.update({k: int(v) for k, v in totals.items() if k in t})
+
+    sql = """
+        INSERT INTO rate_uploads
+        (subject, sender_email, received_at, processed_at,
+         total_rows, "new", increase, decrease, unchanged, closed,
+         backdated_increase, backdated_decrease, billing_increment_changes,
+         created_at, updated_at, meta_data)
+        VALUES
+        (%s, %s, COALESCE(%s, NOW()), %s,
+         %s, %s, %s, %s, %s, %s,
+         %s, %s, %s,
+         NOW(), NOW(), %s)
         RETURNING id;
     """
+
     with get_conn() as conn, conn.cursor() as cur:
-        cur.execute(query, (sender_email, received_at, json.dumps(meta_data) if meta_data else None))
-        rate_upload_id = cur.fetchone()[0]
+        cur.execute(
+            sql,
+            (
+                subject,
+                sender_email,
+                received_at,
+                processed_at,
+                t["total_rows"],
+                t["new"],
+                t["increase"],
+                t["decrease"],
+                t["unchanged"],
+                t["closed"],
+                t["backdated_increase"],
+                t["backdated_decrease"],
+                t["billing_increment_changes"],
+                Json(meta_data) if meta_data is not None else None,
+            ),
+        )
+        new_id = cur.fetchone()[0]
         conn.commit()
-        print(f"Inserted rate upload from {sender_email} → id={rate_upload_id}")
-        return rate_upload_id
+        return new_id
+
 
 def _chunked(seq: List[tuple], size: int):
     for i in range(0, len(seq), size):
