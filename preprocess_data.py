@@ -706,6 +706,10 @@ def _canonicalize_headers(df: pd.DataFrame) -> pd.DataFrame:
             alias_hit[c] = 'Dst Code Name'
             continue  # skip this column
 
+        if c.lower() == 'current rate usd':
+            alias_hit[c] = 'CURRENT RATE USD'
+            continue  # skip this column
+
         key = key_map[c]  # already precleaned+normalized version of c
         hit = ALIAS_MAP.get(key)
         if not hit:
@@ -1014,8 +1018,8 @@ def load_clean_rates(path: str, output_path: str, sheet=None) -> pd.DataFrame:
 
 # ──────────────────────────── quick test ─────────────────────────────────────
 if __name__ == '__main__':
-    FILE_PATH = r'C:\Users\User\OneDrive - Hayo Telecom, Inc\Documents\Work\Rate Sheet Automation\rate-sheet-automation\attachments_new\rates_at_alkaip.com_20250909_195641\R_A_HAYO_TELECOM_INC_090925.xlsx'
-    OUTPUT_FILE_PATH = r'C:\Users\User\OneDrive - Hayo Telecom, Inc\Documents\Work\Rate Sheet Automation\rate-sheet-automation\attachments_new\rates_at_alkaip.com_20250909_195641\R_A_HAYO_TELECOM_INC_090925_cleaned.xlsx'
+    FILE_PATH = r'C:\Users\User\OneDrive - Hayo Telecom, Inc\Documents\Work\Rate Sheet Automation\rate-sheet-automation\attachments_new\rates_at_alkaip.com_20250925_170142\R_A_HAYO_TELECOM_INC_092525.xlsx'
+    OUTPUT_FILE_PATH = r'C:\Users\User\OneDrive - Hayo Telecom, Inc\Documents\Work\Rate Sheet Automation\rate-sheet-automation\attachments_new\rates_at_alkaip.com_20250925_170142\R_A_HAYO_TELECOM_INC_092525_cleaned.xlsx'
     cleaned = load_clean_rates(FILE_PATH, OUTPUT_FILE_PATH, 0)
    
     print('✅ Cleaned and saved.')
