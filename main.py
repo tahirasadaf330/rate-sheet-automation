@@ -32,7 +32,7 @@ from valid_emails import refresh_verified_senders
  
 FAILED_EMAILS_PATH = Path(__file__).with_name("failed_emails.json")
 
-refresh_verified_senders()
+# refresh_verified_senders()
 
 #_____________ Email Verification Script_____________
 
