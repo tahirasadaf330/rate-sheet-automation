@@ -1,12 +1,12 @@
 {
   "version": 1,
-  "last_updated_utc": "2025-09-25T08:07:16Z",
+  "last_updated_utc": "2025-09-29T07:59:39Z",
   "totals": {
-    "unverified_sender": 353,
+    "unverified_sender": 371,
     "subject_invalid": 0,
     "no_attachments": 0,
     "no_valid_attachments": 0,
-    "all": 353
+    "all": 371
   },
   "buckets": {
     "unverified_sender": [
@@ -3891,6 +3891,204 @@
         "logged_at_utc": "2025-09-25T08:07:16Z",
         "details": {
           "verified_list_size": 1
+        }
+      },
+      {
+        "id": "AAMkAGY1YmM3YTkwLWE1YTgtNDc5Yi04ZDBmLTEzNjY3Mjc5OTVkOQBGAAAAAADtqXYOa627SJOboz8X1Xh9BwCDEfFXdYRwQa3Wi-6VTNTJAAAAAAEMAACDEfFXdYRwQa3Wi-6VTNTJAAQgwTj3AAA=",
+        "internetMessageId": "<PAXP190MB14064B3CB15FD4DA3463B055CB1BA@PAXP190MB1406.EURP190.PROD.OUTLOOK.COM>",
+        "sender": "rating@telecelglobal.com",
+        "subject": "Billing Increment Change",
+        "receivedDateTime": "2025-09-29T07:34:53Z",
+        "logged_at_utc": "2025-09-29T07:59:39Z",
+        "details": {
+          "verified_list_size": 0
+        }
+      },
+      {
+        "id": "AAMkAGY1YmM3YTkwLWE1YTgtNDc5Yi04ZDBmLTEzNjY3Mjc5OTVkOQBGAAAAAADtqXYOa627SJOboz8X1Xh9BwCDEfFXdYRwQa3Wi-6VTNTJAAAAAAEMAACDEfFXdYRwQa3Wi-6VTNTJAAQgwTj2AAA=",
+        "internetMessageId": "<140701dc310a$1f506a30$5df13e90$@mainberg.net>",
+        "sender": "rate@mainberg.net",
+        "subject": "Notification of Billing Increment changes for Norfolk Island (Country Code: +672) || 01-October-2025",
+        "receivedDateTime": "2025-09-29T06:29:37Z",
+        "logged_at_utc": "2025-09-29T07:59:39Z",
+        "details": {
+          "verified_list_size": 0
+        }
+      },
+      {
+        "id": "AAMkAGY1YmM3YTkwLWE1YTgtNDc5Yi04ZDBmLTEzNjY3Mjc5OTVkOQBGAAAAAADtqXYOa627SJOboz8X1Xh9BwCDEfFXdYRwQa3Wi-6VTNTJAAAAAAEMAACDEfFXdYRwQa3Wi-6VTNTJAAQgwTj1AAA=",
+        "internetMessageId": "<01a801dc3105$a25f14d0$e71d3e70$@omtelentia.com>",
+        "sender": "rates@omtelentia.com",
+        "subject": "Partial Rate Notification Sheet from OM Telentia via STD",
+        "receivedDateTime": "2025-09-29T05:55:36Z",
+        "logged_at_utc": "2025-09-29T07:59:39Z",
+        "details": {
+          "verified_list_size": 0
+        }
+      },
+      {
+        "id": "AAMkAGY1YmM3YTkwLWE1YTgtNDc5Yi04ZDBmLTEzNjY3Mjc5OTVkOQBGAAAAAADtqXYOa627SJOboz8X1Xh9BwCDEfFXdYRwQa3Wi-6VTNTJAAAAAAEMAACDEfFXdYRwQa3Wi-6VTNTJAAQgwTj0AAA=",
+        "internetMessageId": "<6be8eb62-37f5-4fe4-b86b-9fa7e7357871@DS7PR10MB4957.namprd10.prod.outlook.com>",
+        "sender": "microsoftexchange329e71ec88ae4615bbc36ab6ce41109e@kingrevolution.com",
+        "subject": "Undeliverable: Re: Look International - Rates for Wholesale Customer HAYO-STD 92861 09-28-2025 ",
+        "receivedDateTime": "2025-09-29T05:08:38Z",
+        "logged_at_utc": "2025-09-29T07:59:39Z",
+        "details": {
+          "verified_list_size": 0
+        }
+      },
+      {
+        "id": "AAMkAGY1YmM3YTkwLWE1YTgtNDc5Yi04ZDBmLTEzNjY3Mjc5OTVkOQBGAAAAAADtqXYOa627SJOboz8X1Xh9BwCDEfFXdYRwQa3Wi-6VTNTJAAAAAAEMAACDEfFXdYRwQa3Wi-6VTNTJAAQgwTjzAAA=",
+        "internetMessageId": "<1cf8d233-05f4-4267-a8d3-678fb2d1721a@SJ5PPFA634C6E92.namprd10.prod.outlook.com>",
+        "sender": "microsoftexchange329e71ec88ae4615bbc36ab6ce41109e@kingrevolution.com",
+        "subject": "Undeliverable: Re: Look International - Rates for Wholesale Customer HAYO-PREM 92860 09-28-2025 ",
+        "receivedDateTime": "2025-09-29T05:01:16Z",
+        "logged_at_utc": "2025-09-29T07:59:39Z",
+        "details": {
+          "verified_list_size": 0
+        }
+      },
+      {
+        "id": "AAMkAGY1YmM3YTkwLWE1YTgtNDc5Yi04ZDBmLTEzNjY3Mjc5OTVkOQBGAAAAAADtqXYOa627SJOboz8X1Xh9BwCDEfFXdYRwQa3Wi-6VTNTJAAAAAAEMAACDEfFXdYRwQa3Wi-6VTNTJAAQgwTjyAAA=",
+        "internetMessageId": "<e2627d0e87f040b0ae2ad1ae700d60a2@quickcomtel.com>",
+        "sender": "rates@quickcomtel.com",
+        "subject": "Re: HAYO FULL A-Z REPLACE ORIG CC QUICKCOM TELECOM LIMITED PREFIX:10954#",
+        "receivedDateTime": "2025-09-29T01:44:19Z",
+        "logged_at_utc": "2025-09-29T07:59:39Z",
+        "details": {
+          "verified_list_size": 0
+        }
+      },
+      {
+        "id": "AAMkAGY1YmM3YTkwLWE1YTgtNDc5Yi04ZDBmLTEzNjY3Mjc5OTVkOQBGAAAAAADtqXYOa627SJOboz8X1Xh9BwCDEfFXdYRwQa3Wi-6VTNTJAAAAAAEMAACDEfFXdYRwQa3Wi-6VTNTJAAQgwTjxAAA=",
+        "internetMessageId": "<DT-DSR-0718mRf6Ci6n00024159@us.mail.digitalkcloud.com>",
+        "sender": "rates@sinpin.com",
+        "subject": "Look International - Rates for Wholesale Customer HAYO-STD 92861 09-28-2025 ",
+        "receivedDateTime": "2025-09-28T16:18:25Z",
+        "logged_at_utc": "2025-09-29T07:59:39Z",
+        "details": {
+          "verified_list_size": 0
+        }
+      },
+      {
+        "id": "AAMkAGY1YmM3YTkwLWE1YTgtNDc5Yi04ZDBmLTEzNjY3Mjc5OTVkOQBGAAAAAADtqXYOa627SJOboz8X1Xh9BwCDEfFXdYRwQa3Wi-6VTNTJAAAAAAEMAACDEfFXdYRwQa3Wi-6VTNTJAAQgwTjwAAA=",
+        "internetMessageId": "<DT-DSR-0718cK8r6beU00024158@us.mail.digitalkcloud.com>",
+        "sender": "rates@sinpin.com",
+        "subject": "Look International - Rates for Wholesale Customer HAYO-PREM 92860 09-28-2025 ",
+        "receivedDateTime": "2025-09-28T16:18:22Z",
+        "logged_at_utc": "2025-09-29T07:59:39Z",
+        "details": {
+          "verified_list_size": 0
+        }
+      },
+      {
+        "id": "AAMkAGY1YmM3YTkwLWE1YTgtNDc5Yi04ZDBmLTEzNjY3Mjc5OTVkOQBGAAAAAADtqXYOa627SJOboz8X1Xh9BwCDEfFXdYRwQa3Wi-6VTNTJAAAAAAEMAACDEfFXdYRwQa3Wi-6VTNTJAAQgwTjvAAA=",
+        "internetMessageId": "<CH3PR10MB671631F7AA09465FF6E4934B8B18A@CH3PR10MB6716.namprd10.prod.outlook.com>",
+        "sender": "usman.sajid@hayo.net",
+        "subject": "Re: [SUPPORT #NTN-175-89789]: OBR new version available",
+        "receivedDateTime": "2025-09-28T15:47:49Z",
+        "logged_at_utc": "2025-09-29T07:59:39Z",
+        "details": {
+          "verified_list_size": 0
+        }
+      },
+      {
+        "id": "AAMkAGY1YmM3YTkwLWE1YTgtNDc5Yi04ZDBmLTEzNjY3Mjc5OTVkOQBGAAAAAADtqXYOa627SJOboz8X1Xh9BwCDEfFXdYRwQa3Wi-6VTNTJAAAAAAEMAACDEfFXdYRwQa3Wi-6VTNTJAAQgwTjuAAA=",
+        "internetMessageId": "<002201dc2fb8$9ff0d240$dfd276c0$@ingenuitytelecom.com>",
+        "sender": "sandy@ingenuitytelecom.com",
+        "subject": "RE: Ingenuity Rate Addendum:Hayo-CLI(5432#)_23/09/2025",
+        "receivedDateTime": "2025-09-27T14:11:45Z",
+        "logged_at_utc": "2025-09-29T07:59:39Z",
+        "details": {
+          "verified_list_size": 0
+        }
+      },
+      {
+        "id": "AAMkAGY1YmM3YTkwLWE1YTgtNDc5Yi04ZDBmLTEzNjY3Mjc5OTVkOQBGAAAAAADtqXYOa627SJOboz8X1Xh9BwCDEfFXdYRwQa3Wi-6VTNTJAAAAAAEMAACDEfFXdYRwQa3Wi-6VTNTJAAQfkLWtAAA=",
+        "internetMessageId": "<DM4PR10MB669626EB1C40F53B39B36818C019A@DM4PR10MB6696.namprd10.prod.outlook.com>",
+        "sender": "powerbi@hayo.net",
+        "subject": "Missing Data Alert: Sales Report - 2025-09-27 04:32",
+        "receivedDateTime": "2025-09-27T04:33:03Z",
+        "logged_at_utc": "2025-09-29T07:59:39Z",
+        "details": {
+          "verified_list_size": 0
+        }
+      },
+      {
+        "id": "AAMkAGY1YmM3YTkwLWE1YTgtNDc5Yi04ZDBmLTEzNjY3Mjc5OTVkOQBGAAAAAADtqXYOa627SJOboz8X1Xh9BwCDEfFXdYRwQa3Wi-6VTNTJAAAAAAEMAACDEfFXdYRwQa3Wi-6VTNTJAAQfkLWsAAA=",
+        "internetMessageId": "<b59b15b38071a8af79d1acead7d3a920@swift.generated>",
+        "sender": "rates@infotelecom.al",
+        "subject": "INFO-Telecom - Price List to Hayo Standard [AZ] - Prefix 50001",
+        "receivedDateTime": "2025-09-27T02:05:33Z",
+        "logged_at_utc": "2025-09-29T07:59:39Z",
+        "details": {
+          "verified_list_size": 0
+        }
+      },
+      {
+        "id": "AAMkAGY1YmM3YTkwLWE1YTgtNDc5Yi04ZDBmLTEzNjY3Mjc5OTVkOQBGAAAAAADtqXYOa627SJOboz8X1Xh9BwCDEfFXdYRwQa3Wi-6VTNTJAAAAAAEMAACDEfFXdYRwQa3Wi-6VTNTJAAQfkLWrAAA=",
+        "internetMessageId": "<e3f2385e-3667-472e-8265-2a9e966a02f6@BN1PEPF00004686.namprd03.prod.outlook.com>",
+        "sender": "rates@acmetel.com",
+        "subject": "Acmetel USA LLC Rate Sheet for HAYO TELECOM, INC (LLC)-PREMIUM_S - 09/26/2025 21:10",
+        "receivedDateTime": "2025-09-26T21:11:36Z",
+        "logged_at_utc": "2025-09-29T07:59:39Z",
+        "details": {
+          "verified_list_size": 0
+        }
+      },
+      {
+        "id": "AAMkAGY1YmM3YTkwLWE1YTgtNDc5Yi04ZDBmLTEzNjY3Mjc5OTVkOQBGAAAAAADtqXYOa627SJOboz8X1Xh9BwCDEfFXdYRwQa3Wi-6VTNTJAAAAAAEMAACDEfFXdYRwQa3Wi-6VTNTJAAQfkLWqAAA=",
+        "internetMessageId": "<202509262034.58QKY0pX1436909@smtp201.idt.net>",
+        "sender": "idtsellrates@corp.idt.net",
+        "subject": "New Voice Rates for Hayo Telecom Inc. Gold (Open RTP) [TID:4398578]",
+        "receivedDateTime": "2025-09-26T20:34:33Z",
+        "logged_at_utc": "2025-09-29T07:59:39Z",
+        "details": {
+          "verified_list_size": 0
+        }
+      },
+      {
+        "id": "AAMkAGY1YmM3YTkwLWE1YTgtNDc5Yi04ZDBmLTEzNjY3Mjc5OTVkOQBGAAAAAADtqXYOa627SJOboz8X1Xh9BwCDEfFXdYRwQa3Wi-6VTNTJAAAAAAEMAACDEfFXdYRwQa3Wi-6VTNTJAAQfkLWpAAA=",
+        "internetMessageId": "<202509262033.58QKXwvj2013278@smtp101.idt.net>",
+        "sender": "idtsellrates@corp.idt.net",
+        "subject": "New Voice Rates for Hayo Telecom Inc. Gold [TID:4398575]",
+        "receivedDateTime": "2025-09-26T20:34:28Z",
+        "logged_at_utc": "2025-09-29T07:59:39Z",
+        "details": {
+          "verified_list_size": 0
+        }
+      },
+      {
+        "id": "AAMkAGY1YmM3YTkwLWE1YTgtNDc5Yi04ZDBmLTEzNjY3Mjc5OTVkOQBGAAAAAADtqXYOa627SJOboz8X1Xh9BwCDEfFXdYRwQa3Wi-6VTNTJAAAAAAEMAACDEfFXdYRwQa3Wi-6VTNTJAAQfkLWoAAA=",
+        "internetMessageId": "<202509262032.58QKWnOp2012501@smtp101.idt.net>",
+        "sender": "idtsellrates@corp.idt.net",
+        "subject": "New Voice Rates for Hayo Telecom Inc. Platinum [TID:4398518]",
+        "receivedDateTime": "2025-09-26T20:33:23Z",
+        "logged_at_utc": "2025-09-29T07:59:39Z",
+        "details": {
+          "verified_list_size": 0
+        }
+      },
+      {
+        "id": "AAMkAGY1YmM3YTkwLWE1YTgtNDc5Yi04ZDBmLTEzNjY3Mjc5OTVkOQBGAAAAAADtqXYOa627SJOboz8X1Xh9BwCDEfFXdYRwQa3Wi-6VTNTJAAAAAAEMAACDEfFXdYRwQa3Wi-6VTNTJAAQfkLWnAAA=",
+        "internetMessageId": "<202509262030.58QKUUdi2010941@smtp101.idt.net>",
+        "sender": "idtsellrates@corp.idt.net",
+        "subject": "New Voice Rates for Hayo Telecom Inc. Platinum (Open RTP) [TID:4398410]",
+        "receivedDateTime": "2025-09-26T20:31:03Z",
+        "logged_at_utc": "2025-09-29T07:59:39Z",
+        "details": {
+          "verified_list_size": 0
+        }
+      },
+      {
+        "id": "AAMkAGY1YmM3YTkwLWE1YTgtNDc5Yi04ZDBmLTEzNjY3Mjc5OTVkOQBGAAAAAADtqXYOa627SJOboz8X1Xh9BwCDEfFXdYRwQa3Wi-6VTNTJAAAAAAEMAACDEfFXdYRwQa3Wi-6VTNTJAAQfkLWmAAA=",
+        "internetMessageId": "<927e27732de2adfcb30851fe90bee5bf@support.jerasoft.net>",
+        "sender": "support@jerasoft.net",
+        "subject": "[SUPPORT #NTN-175-89789]: OBR new version available",
+        "receivedDateTime": "2025-09-26T17:32:31Z",
+        "logged_at_utc": "2025-09-29T07:59:39Z",
+        "details": {
+          "verified_list_size": 0
         }
       }
     ],

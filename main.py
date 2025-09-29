@@ -23,7 +23,7 @@ from pathlib import Path
 from preprocess_data import load_clean_rates
 from typing import Iterable, Tuple, Optional, Dict, Any, List
 from datetime import datetime, timezone
-from database import insert_rate_upload, bulk_insert_rate_upload_details, replace_rejected_emails_metadata, push_failed_emails_json_to_db
+from database import insert_rate_upload, bulk_insert_rate_upload_details, push_failed_emails_json_to_db
 import pandas as pd
 from typing import Any 
 from valid_emails import refresh_verified_senders
