@@ -62,62 +62,88 @@ def _parse_iso_utc(s: Optional[str]) -> Optional[datetime]:
     except Exception:
         return None
 
-def insert_rejected_email(
-    sender_email: Optional[str],
-    subject: Optional[str],
-    category: str,
-    notes: Optional[str],
-    received_at: Optional[datetime],
-    processed_at: Optional[datetime],
-) -> int:
+# def insert_rejected_email(
+#     sender_email: Optional[str],
+#     subject: Optional[str],
+#     category: str,
+#     notes: Optional[str],
+#     received_at: Optional[datetime],
+#     processed_at: Optional[datetime],
+# ) -> int:
+#     """
+#     Insert a single rejected email row and return its id.
+#     Table columns (managed by DB): id (PK), created_at, updated_at auto.
+#     """
+#     sql = """
+#         INSERT INTO rejected_emails
+#         (sender_email, subject, category, notes, received_at, processed_at, created_at, updated_at)
+#         VALUES (%s, %s, %s, %s, %s, %s, NOW(), NOW())
+#         RETURNING id;
+#     """
+#     with get_conn() as conn, conn.cursor() as cur:
+#         cur.execute(
+#             sql,
+#             (sender_email, subject, category, notes, received_at, processed_at),
+#         )
+#         new_id = cur.fetchone()[0]
+#         conn.commit()
+#         return new_id
+
+
+from typing import Iterable, Mapping, Any, List, Optional
+# import here to avoid requiring psycopg2 unless this function is used
+def insert_rejected_emails(rows: Iterable[Mapping[str, Any]]) -> List[int]:
     """
-    Insert a single rejected email row and return its id.
-    Table columns (managed by DB): id (PK), created_at, updated_at auto.
+    Bulk-insert multiple rejected email rows and return list of new ids in the same order.
+
+    `rows` should be an iterable of mappings with keys:
+      - sender_email (Optional[str])
+      - subject (Optional[str])
+      - category (str)                # required
+      - notes (Optional[str])
+      - received_at (Optional[datetime])
+      - processed_at (Optional[datetime])
+
+    Returns: list of inserted ids (may be empty).
     """
+    # collect values in the order expected by the DB
+    values = []
+    for r in rows:
+        # ensure category exists (raise so caller notices bad input)
+        category = r.get("category")
+        if category is None:
+            raise ValueError("Each row must include a 'category' value.")
+        values.append((
+            r.get("sender_email"),
+            r.get("subject"),
+            str(category),
+            r.get("notes"),
+            r.get("received_at"),
+            r.get("processed_at"),
+        ))
+
+    if not values:
+        return []
+
+    # use psycopg2.extras.execute_values for efficient bulk insert + RETURNING
+    try:
+        from psycopg2.extras import execute_values
+    except Exception as e:
+        raise RuntimeError("psycopg2.extras.execute_values is required for bulk insert.") from e
+
     sql = """
         INSERT INTO rejected_emails
         (sender_email, subject, category, notes, received_at, processed_at, created_at, updated_at)
-        VALUES (%s, %s, %s, %s, %s, %s, NOW(), NOW())
+        VALUES %s
         RETURNING id;
     """
+
     with get_conn() as conn, conn.cursor() as cur:
-        cur.execute(
-            sql,
-            (sender_email, subject, category, notes, received_at, processed_at),
-        )
-        new_id = cur.fetchone()[0]
+        # execute_values will expand the VALUES %s placeholder into many tuples
+        execute_values(cur, sql, values, template=None, page_size=100)
+        ids = [row[0] for row in cur.fetchall()]
         conn.commit()
-        return new_id
-
-def bulk_insert_rejected_emails(data: List[Dict[str, Any]]) -> int:
-    """
-    Bulk insert rejected emails into the database.
-    """
-    sql = """
-        INSERT INTO rejected_emails
-        (sender_email, subject, category, notes, received_at, processed_at, created_at, updated_at)
-        VALUES %s;
-    """
-
-    values = [
-        (
-            entry.get("sender_email"),
-            entry.get("subject"),
-            entry.get("category"),
-            entry.get("notes"),
-            _parse_iso_utc(entry.get("receivedDateTime")),
-            _parse_iso_utc(entry.get("logged_at_utc")),
-        )
-        for entry in data if not entry.get("already_pushed")
-    ]
-
-    if values:
-        with get_conn() as conn, conn.cursor() as cur:
-            execute_values(cur, sql, values)
-            conn.commit()
-            return len(values)
-    return 0
-
+    return ids
 
 def _atomic_write_json(path: Path, data: Dict[str, Any]) -> None:
     """Write JSON atomically to avoid corruption on crashes."""
@@ -169,16 +195,11 @@ def insert_rejected_email_row(
         conn.commit()
         return new_id
 
-
 def push_failed_emails_json_to_db(path: Optional[str | Path] = None) -> tuple[int, int, int]:
     """
     Read failed_emails.json and insert any entries not yet pushed (no 'already_pushed': true)
-    into the rejected_emails table. After a successful insert, mark the JSON entry with
-    'already_pushed': true and atomically rewrite the JSON file.
-
-    Args:
-        path: path to failed_emails.json. If None, defaults to a file named
-              'failed_emails.json' next to this database.py.
+    into the rejected_emails table using a bulk insert. After a successful insert, mark the JSON
+    entry with 'already_pushed': true and atomically rewrite the JSON file.
 
     Returns:
         (inserted_count, skipped_already_pushed, errors)
@@ -204,53 +225,92 @@ def push_failed_emails_json_to_db(path: Optional[str | Path] = None) -> tuple[in
     skipped = 0
     errors = 0
 
-    # Iterate all categories present in the file
+    # Prepare a list of rows to bulk-insert and keep references to the original entries
+    rows_to_insert: list[dict] = []
+    entry_refs: list[dict] = []
+
     for category, items in buckets.items():
         if not isinstance(items, list):
             continue
 
         for entry in items:
+            # Skip if already pushed
+            if bool(entry.get("already_pushed")):
+                skipped += 1
+                continue
+
+            sender_email = (entry.get("sender") or "").strip() or None
+            subject = (entry.get("subject") or "").strip() or None
+            received_at = _parse_iso_utc(entry.get("receivedDateTime"))
+            processed_at = _parse_iso_utc(entry.get("logged_at_utc"))
+
+            # Build a compact notes string that does not restate the category itself.
+            details = entry.get("details")
+            if details is None:
+                notes = ""
+            else:
+                try:
+                    notes_full = json.dumps(details, ensure_ascii=False)
+                except Exception:
+                    notes_full = str(details)
+                notes = notes_full if len(notes_full) <= 2000 else (notes_full[:1970] + "...(truncated)")
+
+            rows_to_insert.append({
+                "sender_email": sender_email,
+                "subject": subject,
+                "category": str(category),
+                "notes": notes,
+                "received_at": received_at,
+                "processed_at": processed_at,
+            })
+            entry_refs.append(entry)
+
+    # Nothing to insert
+    if not rows_to_insert:
+        print(f"(info) no new failed emails to push. skipped={skipped}")
+        return (0, skipped, errors)
+
+    # Attempt bulk insert
+    try:
+        ids = insert_rejected_emails(rows_to_insert)  # expects list of ids
+        # Normalize returned ids to a list
+        if isinstance(ids, int):
+            ids = [ids]
+        elif ids is None:
+            ids = []
+
+        # Mark the corresponding JSON entries as pushed
+        for i in range(min(len(ids), len(entry_refs))):
+            entry_refs[i]["already_pushed"] = True
+        inserted = len(ids)
+
+    except Exception as bulk_exc:
+        print(f"(warn) bulk insert failed: {bulk_exc}. Falling back to single-row inserts.")
+        # Fallback: try inserting row-by-row so partial progress is possible
+        for i, row in enumerate(rows_to_insert):
+            entry = entry_refs[i]
             try:
-                # Skip if already pushed
-                if bool(entry.get("already_pushed")):
-                    skipped += 1
-                    continue
+                # Prefer single-row API if available; otherwise call bulk API with single item
+                try:
+                    new_id = insert_rejected_email(
+                        sender_email=row["sender_email"],
+                        subject=row["subject"],
+                        category=row["category"],
+                        notes=row["notes"],
+                        received_at=row["received_at"],
+                        processed_at=row["processed_at"],
+                    )
+                except NameError:
+                    # insert_rejected_email not defined, try bulk function for single row
+                    res = insert_rejected_emails([row])
+                    new_id = (res[0] if res else 0) if isinstance(res, list) else (res or 0)
 
-                sender_email = (entry.get("sender") or "").strip() or None
-                subject = (entry.get("subject") or "").strip() or None
-                received_at = _parse_iso_utc(entry.get("receivedDateTime"))
-                processed_at = _parse_iso_utc(entry.get("logged_at_utc"))
-
-                # Build a compact notes string that does not restate the category itself.
-                details = entry.get("details")
-                if details is None:
-                    notes = ""
-                else:
-                    # Keep it textual; avoid duplicating the category phrasing.
-                    # If details is large, truncate to keep row small.
-                    try:
-                        notes_full = json.dumps(details, ensure_ascii=False)
-                    except Exception:
-                        notes_full = str(details)
-                    notes = notes_full if len(notes_full) <= 2000 else (notes_full[:1970] + "...(truncated)")
-
-                # Insert row
-                _ = insert_rejected_email(
-                    sender_email=sender_email,
-                    subject=subject,
-                    category=str(category),
-                    notes=notes,
-                    received_at=received_at,
-                    processed_at=processed_at,
-                )
-                inserted += 1
-
-                # Mark as pushed in-memory
+                # If we got here without exception, mark pushed
                 entry["already_pushed"] = True
-
-            except Exception as e:
+                inserted += 1
+            except Exception as single_exc:
                 errors += 1
-                print(f"(warn) failed to insert rejected email ({category}): {e}")
+                print(f"(warn) failed to insert rejected email (category={row['category']}): {single_exc}")
 
     # Persist the updated JSON with the already_pushed flags
     try:
@@ -263,8 +323,6 @@ def push_failed_emails_json_to_db(path: Optional[str | Path] = None) -> tuple[in
 
     print(f"(ok) rejected_emails sync → inserted={inserted}, skipped={skipped}, errors={errors}")
     return (inserted, skipped, errors)
-
-
 
 def insert_rate_upload(
     *,
@@ -334,7 +392,6 @@ def insert_rate_upload(
         new_id = cur.fetchone()[0]
         conn.commit()
         return new_id
-
 
 def _chunked(seq: List[tuple], size: int):
     for i in range(0, len(seq), size):

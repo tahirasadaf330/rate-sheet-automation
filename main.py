@@ -521,6 +521,7 @@ def compare_preprocessed_folders(
 compare_preprocessed_folders("attachments", notice_days=7, rate_tol=0.0001)  #check the difference upto 4 decimal places.
 
 ###############################################
+##############################################
 
 from database import insert_rejected_email_row  # add this import at the top with others
 
@@ -601,6 +602,26 @@ def push_rejections_from_metadata(attachments_root: str | Path) -> tuple[int, in
             if failed:
                 category = "preprocessing_error"
                 notes = "Preprocessing failed for: " + ", ".join(failed)
+        
+        # 3.5) Comparison step failed or skipped (accepts either 'comparision_result' or 'comparison_result')
+        if not category:
+            comp = meta.get("comparision_result") or meta.get("comparison_result")
+            if comp is not None:
+                if isinstance(comp, dict):
+                    result_val = (comp.get("result") or "").strip()
+                    extra = comp.get("message") or comp.get("detail") or None
+                else:
+                    result_val = str(comp).strip()
+                    extra = None
+
+                # treat anything other than "ok" (case-insensitive) as a failure
+                if result_val.lower() != "ok":
+                    category = "comparison_failed"
+                    note_parts = [f"Comparison result: {result_val or 'unknown'}."]
+                    if extra:
+                        note_parts.append(str(extra))
+                    notes = " ".join(note_parts)
+
 
         # 4) Vendor files need human review: small outputs
         if not category and bool(meta.get("need_human_eval_pre")):
@@ -646,7 +667,7 @@ def push_rejections_from_metadata(attachments_root: str | Path) -> tuple[int, in
     print(f"\n=== Rejections from metadata ===\nFolders scanned: {scanned}\nRows inserted: {inserted}\n")
     return scanned, inserted
 
-#________________ Database Script _____________
+# ________________ Database Script _____________
 
 ATTACHMENTS_ROOT = "attachments"
 _ALLOWED_EXTS = {".xlsx", ".xls", ".csv"}

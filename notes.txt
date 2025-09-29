@@ -21,27 +21,7 @@ jerasoft as the col name is consistent.
 
 to do
 
-2) (Optional) De-duplicate the “insert rejected email” function
-
-You’ve got both insert_rejected_email and insert_rejected_email_row that do the same thing. You can keep either one; if you want to standardize on
-
--gpt highlighting issue in the read_comparison_table
-
-- new issue spotted you might have to define a different process for the jerasoft file cleaning.
-
-- also reinstall the requirements file on the server too.
-
-- add two methods like if the data fetched by one excel file read method is too tiny or 
-the column are not detected properly then it should fallback to the other one by default. (implemented)
-
-- add one more category in the failed emails which will show failed processed like
-in cases where the system failed to process an email due to following reasons (take the details from the 
-metadata.json file)
-
-> file cleaning failed
-> no data fetched from jerasoft (empty jerasoft file)
-> data fetched too short like 7-8 rows so system should show it infact put it as a seperate category what you say. (gotcha)
-
+also do push the comparison result in case of failed emails
 
 ===================================
 
