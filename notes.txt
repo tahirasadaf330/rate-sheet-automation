@@ -74,3 +74,6 @@ see the serach time complexity in both cases.
 - in header searching code stop the searchin if the 
 code passes first 1000 rows that usually means there
 is no matching.
+
+check in the alkaip files the two rates columns are causing the issue.
+might be due to your similar word matching God knows

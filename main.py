@@ -36,7 +36,7 @@ FAILED_EMAILS_PATH = Path(__file__).with_name("failed_emails.json")
 
 #_____________ Email Verification Script_____________
 
-after = "2025-08-29"              # only include emails on/after this date (YYYY-MM-DD) or None     "2025-08-29"
+after = "2025-09-10"              # only include emails on/after this date (YYYY-MM-DD) or None     "2025-08-29"
 before = None       # only include emails on/before this date (YYYY-MM-DD) or None
 unread_only = False    
 ATTEMPTS = 2

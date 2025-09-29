@@ -205,13 +205,21 @@ def _synthesize_billing_increment(df: pd.DataFrame) -> pd.DataFrame:
 #________________________________ read raw ──────────────────────────────────
 
 def _raw_from_ws(ws) -> pd.DataFrame:
-    ws.calculate_dimension()  # fix stale used-range
+    try:
+        # Try to calculate dimensions without forcing
+        ws.calculate_dimension()
+    except ValueError:
+        # If it fails, use calculate_dimension with force=True
+        print("DEBUG: Extraction failed without force; retrying with force=True")
+        ws.calculate_dimension(force=True)
+
     rows = list(ws.iter_rows(values_only=True))
     raw = pd.DataFrame(rows)
     raw.dropna(how="all", inplace=True)
     raw.dropna(axis=1, how="all", inplace=True)
     raw.reset_index(drop=True, inplace=True)
     return raw.astype("string")
+
 
 
 def _raw_from_excel_pandas(path: str, sheet) -> pd.DataFrame:
@@ -979,6 +987,8 @@ def load_clean_rates(path: str, output_path: str, sheet=None) -> pd.DataFrame:
     s = (s
          .str.replace(r'[\$\£\€]', '', regex=True)
          .str.replace(r'\s+', '', regex=True))
+
+ 
     df['Rate'] = pd.to_numeric(s, errors='coerce')
 
     # Billing Increment: normalize to "x/y"
@@ -1004,8 +1014,8 @@ def load_clean_rates(path: str, output_path: str, sheet=None) -> pd.DataFrame:
 
 # ──────────────────────────── quick test ─────────────────────────────────────
 if __name__ == '__main__':
-    FILE_PATH = r'C:\Users\User\OneDrive - Hayo Telecom, Inc\Documents\Work\Rate Sheet Automation\rate-sheet-automation\attachments_new\rate_at_qoolize.com_20250902_123633\Hayo_-_Premium_-_In_-Tech_Prefix__7013_-_02_Sep_2025_jerasoft_comparison.xlsx'
-    OUTPUT_FILE_PATH = r'C:\Users\User\OneDrive - Hayo Telecom, Inc\Documents\Work\Rate Sheet Automation\rate-sheet-automation\attachments_new\rate_at_qoolize.com_20250902_123633\Hayo_-_Premium_-_In_-Tech_Prefix__7013_-_02_Sep_2025_jerasoft_comparison_cleaned.xlsx'
+    FILE_PATH = r'C:\Users\User\OneDrive - Hayo Telecom, Inc\Documents\Work\Rate Sheet Automation\rate-sheet-automation\attachments_new\rates_at_alkaip.com_20250909_195641\R_A_HAYO_TELECOM_INC_090925.xlsx'
+    OUTPUT_FILE_PATH = r'C:\Users\User\OneDrive - Hayo Telecom, Inc\Documents\Work\Rate Sheet Automation\rate-sheet-automation\attachments_new\rates_at_alkaip.com_20250909_195641\R_A_HAYO_TELECOM_INC_090925_cleaned.xlsx'
     cleaned = load_clean_rates(FILE_PATH, OUTPUT_FILE_PATH, 0)
    
     print('✅ Cleaned and saved.')
