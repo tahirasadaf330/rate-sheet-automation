@@ -182,8 +182,8 @@ def insert_rejected_email_row(
     """
     sql = """
         INSERT INTO rejected_emails
-          (sender_email, subject, category, notes, received_at, processed_at, created_at, updated_at)
-        VALUES (%s, %s, %s, %s, %s, %s, NOW(), NOW())
+          (sender_email, subject, category, notes, received_at, processed_at)
+        VALUES (%s, %s, %s, %s, %s, %s)
         RETURNING id;
     """
     with get_conn() as conn, conn.cursor() as cur:
