@@ -64,3 +64,10 @@ future considerations
 set alerts that will show up on dashboards if there is an issue like too much of 
 data or too less or the file from jerasoft is fetched empty which can tell the 
 rate team to manaually handle the case.
+
+
+track the emails that have been processed so the system wont process them again
+like by keeping a meta file etc...
+
+see the serach time complexity in both cases.
+

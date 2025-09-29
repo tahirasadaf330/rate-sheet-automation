@@ -224,7 +224,7 @@ def _raw_from_excel_pandas(path: str, sheet) -> pd.DataFrame:
     last_exc = None
     for eng in engines:
         try:
-            df = pd.read_excel(path, sheet_name=sheet, engine=eng, header=None, dtype=object)
+            df = pd.read_excel(path)
             # Normalize to your raw-grid shape, like _raw_from_ws
             df = pd.DataFrame(df)
             df.dropna(how="all", inplace=True)
