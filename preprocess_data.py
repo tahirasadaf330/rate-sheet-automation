@@ -320,16 +320,99 @@ def _read_raw_matrix(path: str, sheet=0) -> pd.DataFrame:
 
 
 # ---- Header detection (instrumented) ----
+# def detect_header_row(raw: pd.DataFrame) -> int:
+#     """
+#     Find the row index that, after normalization + alias mapping,
+#     contains ALL required canonical columns.
+#     Prints detailed debug info so you can see what failed.
+
+#     Relies on:
+#       - REQUIRED_COLS: list of canonical column names
+#       - _norm(s): normalizer function
+#       - ALIAS_MAP: dict of normalized header -> canonical name
+#     """
+#     targets = set(REQUIRED_COLS)
+
+#     best_count = -1
+#     best_row = -1
+#     best_covered = set()
+
+#     for idx, row in raw.iterrows():
+#         # raw cell texts on this row (skip NaN)
+#         cells = [x for x in row if pd.notna(x)]
+#         precleaned = [_preclean_header_token(x) for x in cells]
+#         normed = [_norm(x) for x in precleaned]
+#         mapped = [ALIAS_MAP.get(n) or _match_alias_substring(n) for n in normed]
+
+#         covered = {m for m in mapped if m}
+#         ###################
+#         # ---------- tolerate missing Billing Increment if related headers exist ----------
+#         if 'Billing Increment' not in covered:
+#             norm_set = set(normed)
+
+#             def _has_key(key: str) -> bool:
+#                 # fuzzy: exact, prefix, suffix, or underscore-delimited infix
+#                 return any(
+#                     n == key
+#                     or n.startswith(key + '_')
+#                     or n.endswith('_' + key)
+#                     or ('_' + key + '_') in ('_' + n + '_')
+#                     for n in norm_set
+#                 )
+
+#             # Pairs allow perfect synthesis later
+#             pair_hit = any(_has_key(a) and _has_key(b) for (a, b) in BILLING_PAIRS)
+
+#             # Singles are also enough, because _synthesize_billing_increment can duplicate a single
+#             singles = ['initial_period', 'min_bill', 'first_increment', 'increment']
+#             single_hit = any(_has_key(k) for k in singles)
+
+#             if pair_hit or single_hit:
+#                 covered.add('Billing Increment')
+
+#             dbg("  billing_pair_hit:", pair_hit, "singles_hit:", single_hit,
+#                 "pairs_checked:", BILLING_PAIRS, "singles_checked:", singles)
+#         # -----------------------------------------------------------------------------
+#         ##################
+
+#         missing = targets - covered
+
+#         # DEBUG dump
+#         dbg(f"[hdr-scan] row={idx}")
+#         dbg("  cells:", [repr(x) for x in cells])
+#         dbg("  precleaned:", [repr(x) for x in precleaned])
+#         dbg("  normed:", normed)
+#         dbg("  mapped:", mapped)
+#         if missing:
+#             dbg("  still-missing:", sorted(missing))
+#         else:
+#             dbg(f"[hdr-scan] FOUND header row -> {idx}")
+#             return idx
+
+#         # track best partial coverage to help when failing
+#         if len(covered & targets) > best_count:
+#             best_count = len(covered & targets)
+#             best_row = idx
+#             best_covered = covered & targets
+
+#     # If we got here, we failed. Print the best candidate with codepoints.
+#     dbg(f"[hdr-scan] best coverage: {best_count} on row {best_row} -> {sorted(best_covered)}")
+#     if best_row != -1:
+#         best_cells = [x for x in raw.iloc[best_row] if pd.notna(x)]
+#         dbg("[hdr-scan] best row cells (repr):", [repr(x) for x in best_cells])
+#         dbg("[hdr-scan] best row cells (_norm):", [_norm(x) for x in best_cells])
+#         dbg("[hdr-scan] best row cells (codepoints):", [_codepoints(str(x)) for x in best_cells])
+
+#     raise ValueError(
+#         "Header not found. None of the rows contained all required columns "
+#         f"after normalization/aliasing. Required: {REQUIRED_COLS}"
+#     )
+
+# In the detect_header_row function:
 def detect_header_row(raw: pd.DataFrame) -> int:
     """
     Find the row index that, after normalization + alias mapping,
-    contains ALL required canonical columns.
-    Prints detailed debug info so you can see what failed.
-
-    Relies on:
-      - REQUIRED_COLS: list of canonical column names
-      - _norm(s): normalizer function
-      - ALIAS_MAP: dict of normalized header -> canonical name
+    contains ALL required canonical columns, but stops after 1000 rows.
     """
     targets = set(REQUIRED_COLS)
 
@@ -337,7 +420,13 @@ def detect_header_row(raw: pd.DataFrame) -> int:
     best_row = -1
     best_covered = set()
 
+    # Add a max row limit of 1000
+    max_row_limit = 1000
+
     for idx, row in raw.iterrows():
+        if idx >= max_row_limit:
+            break  # Stop searching after 1000 rows
+
         # raw cell texts on this row (skip NaN)
         cells = [x for x in row if pd.notna(x)]
         precleaned = [_preclean_header_token(x) for x in cells]
@@ -372,7 +461,7 @@ def detect_header_row(raw: pd.DataFrame) -> int:
 
             dbg("  billing_pair_hit:", pair_hit, "singles_hit:", single_hit,
                 "pairs_checked:", BILLING_PAIRS, "singles_checked:", singles)
-        # -----------------------------------------------------------------------------
+        # ----------------------------------------------------------------------------- 
         ##################
 
         missing = targets - covered
@@ -407,6 +496,7 @@ def detect_header_row(raw: pd.DataFrame) -> int:
         "Header not found. None of the rows contained all required columns "
         f"after normalization/aliasing. Required: {REQUIRED_COLS}"
     )
+
 
 # kill zero-widths and collapse all whitespace/slashes/hyphens; strip punctuation
 _ZW = r'[\u200B-\u200D\uFEFF]'

@@ -71,3 +71,6 @@ like by keeping a meta file etc...
 
 see the serach time complexity in both cases.
 
+- in header searching code stop the searchin if the 
+code passes first 1000 rows that usually means there
+is no matching.
