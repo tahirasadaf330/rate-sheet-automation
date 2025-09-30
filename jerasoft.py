@@ -113,21 +113,6 @@ def extract_company_keyword(query: str) -> str:
     m = re.search(r"[A-Za-z0-9._-]+", query or "")
     return (m.group(0).lower() if m else "").strip()
 
-# def _post_json(api_url: str, payload: Dict, timeout: int = 500) -> Dict:
-#     resp = _session.post(api_url, headers=DEFAULT_HEADERS, json=payload, timeout=timeout)
-#     resp.raise_for_status()
-#     ctype = resp.headers.get("Content-Type", "")
-#     try:
-#         return resp.json()
-#     except JSONDecodeError as e:
-#         head = resp.text[:1000]
-#         tail = resp.text[-500:] if len(resp.text) > 1500 else ""
-#         raise RuntimeError(
-#             f"JSON decode failed at pos {e.pos}: {e.msg}. "
-#             f"status={resp.status_code} content_type={ctype}. "
-#             f"body_start={head!r} body_end={tail!r}"
-#         )
-
 def _post_json(api_url: str, payload: Dict, timeout: int = 500) -> Dict:
     resp = _session.post(api_url, headers=DEFAULT_HEADERS, json=payload, timeout=timeout)
     resp.raise_for_status()
@@ -142,7 +127,6 @@ def _post_json(api_url: str, payload: Dict, timeout: int = 500) -> Dict:
             f"status={resp.status_code} content_type={ctype} content_length={clen} "
             f"body_len={len(body)} body_start={body[:1000]!r} body_end={body[-500:]!r}"
         )
-
 
 def fetch_all_tables(api_url: Optional[str] = None, api_key: Optional[str] = None, page_size: int = 500) -> List[Dict]:
     """Fetch all rate tables via pagination."""
@@ -221,90 +205,6 @@ def find_best_term_table(
         raise KeyError("Best table did not include an 'id' field")
 
     return int(best_id), best_table, scored[:top_k]
-
-
-# def fetch_active_current_future_rates(
-#     table_id: int,
-#     api_url: Optional[str] = None,
-#     api_key: Optional[str] = None,
-#     when_utc: Optional[datetime] = None,
-#     page_limit: int = 5000,  # server may cap this; we’ll still paginate safely
-# ) -> pd.DataFrame:
-#     """
-#     Fetch active current & future rates into a tidy DataFrame.
-#     - Uses stable server-side ordering for consistent pagination.
-#     - V1-style pagination: increment by len(result); stop only on empty page.
-#     """
-#     api_url = api_url or DEFAULT_API_URL
-#     api_key = api_key or DEFAULT_API_KEY
-#     if not api_key:
-#         raise ValueError("Missing API key (env JERA_SOFT_API_KEY or pass api_key).")
-
-#     when_utc = when_utc or datetime.utcnow()
-
-#     offset = 0
-#     all_records: List[Dict] = []
-
-#     base_params = {
-#         "AUTH": api_key,
-#         "rate_tables_id": table_id,
-#         "state": "current_future",
-#         "status": "active",
-#         "__tz": "UTC",
-#         "dt": when_utc.strftime("%Y-%m-%d %H:%M:%S"),
-#         "limit": page_limit,
-#         "order": ["+code", "-effective_from"],  # stable ordering for paging parity
-#     }
-
-#     while True:
-#         params = dict(base_params, offset=offset)
-
-#         payload = {
-#             "jsonrpc": "2.0",
-#             "id": 1,
-#             "method": "rates.search",
-#             "params": params,
-#         }
-
-#         data = _post_json(api_url, payload)
-#         result = data.get("result")
-#         if not isinstance(result, list):
-#             raise RuntimeError(f"Unexpected response or error: {str(data)[:400]}")
-
-#         if not result:
-#             break
-
-#         all_records.extend(result)
-#         # V1-style: move offset by what we actually got; don't assume server honors 'limit'
-#         offset += len(result)
-
-#     if not all_records:
-#         return pd.DataFrame(columns=[
-#             "Dst Code", "Dst Code Name", "Rate", "Effective Date", "Billing Increment"
-#         ])
-
-#     df = pd.DataFrame(all_records)
-
-#     # Billing Increment (robust to missing)
-#     min_vol = df.get("min_volume")
-#     pay_int = df.get("pay_interval")
-#     min_vol_str = min_vol.where(min_vol.notna(), "").astype(str) if min_vol is not None else ""
-#     pay_int_str = pay_int.where(pay_int.notna(), "").astype(str) if pay_int is not None else ""
-#     df["Billing Increment"] = (
-#         (min_vol_str if isinstance(min_vol_str, pd.Series) else "") + "/" +
-#         (pay_int_str if isinstance(pay_int_str, pd.Series) else "")
-#     ).str.strip("/")
-
-#     keep = ["code", "code_name", "value", "effective_from", "Billing Increment"]
-#     keep_existing = [c for c in keep if c in df.columns]
-#     df_selected = df[keep_existing].rename(columns={
-#         "code": "Dst Code",
-#         "code_name": "Dst Code Name",
-#         "value": "Rate",
-#         "effective_from": "Effective Date",
-#     })
-
-#     return df_selected.reset_index(drop=True)
 
 def fetch_active_current_future_rates(
     table_id: int,
@@ -443,10 +343,14 @@ def export_rates_by_query(
 
     if best_table == "" and top_scored == "":
         return table_id # error message from find_best_term_table
+    
+    print(f"DEBUG: Best table: ID={table_id} NAME='{best_table.get('name')}' SCORE={top_scored[0][0]:.3f}")
 
     df = fetch_active_current_future_rates(
         table_id=table_id, api_url=api_url, api_key=api_key
     )
+
+    print(f"DEBIG: Fetched {df.shape[0]} active current & future rates.")
 
     saved_to = save_rates_to_excel(df, output_path)
 

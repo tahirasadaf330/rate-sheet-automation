@@ -2,7 +2,7 @@ import os
 from dotenv import load_dotenv
 import psycopg2
 from valid_emails import VERIFIED_SENDERS
-from typing import Iterable, Dict, Any, Optional, List
+from typing import Iterable, Dict, Any, Optional, List, Mapping
 from datetime import datetime
 from decimal import Decimal
 import json
@@ -62,35 +62,33 @@ def _parse_iso_utc(s: Optional[str]) -> Optional[datetime]:
     except Exception:
         return None
 
-# def insert_rejected_email(
-#     sender_email: Optional[str],
-#     subject: Optional[str],
-#     category: str,
-#     notes: Optional[str],
-#     received_at: Optional[datetime],
-#     processed_at: Optional[datetime],
-# ) -> int:
-#     """
-#     Insert a single rejected email row and return its id.
-#     Table columns (managed by DB): id (PK), created_at, updated_at auto.
-#     """
-#     sql = """
-#         INSERT INTO rejected_emails
-#         (sender_email, subject, category, notes, received_at, processed_at, created_at, updated_at)
-#         VALUES (%s, %s, %s, %s, %s, %s, NOW(), NOW())
-#         RETURNING id;
-#     """
-#     with get_conn() as conn, conn.cursor() as cur:
-#         cur.execute(
-#             sql,
-#             (sender_email, subject, category, notes, received_at, processed_at),
-#         )
-#         new_id = cur.fetchone()[0]
-#         conn.commit()
-#         return new_id
+def insert_rejected_email(
+    sender_email: Optional[str],
+    subject: Optional[str],
+    category: str,
+    notes: Optional[str],
+    received_at: Optional[datetime],
+    processed_at: Optional[datetime],
+) -> int:
+    """
+    Insert a single rejected email row and return its id.
+    Table columns (managed by DB): id (PK), created_at, updated_at auto.
+    """
+    sql = """
+        INSERT INTO rejected_emails
+        (sender_email, subject, category, notes, received_at, processed_at, created_at, updated_at)
+        VALUES (%s, %s, %s, %s, %s, %s, NOW(), NOW())
+        RETURNING id;
+    """
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            sql,
+            (sender_email, subject, category, notes, received_at, processed_at),
+        )
+        new_id = cur.fetchone()[0]
+        conn.commit()
+        return new_id
 
-
-from typing import Iterable, Mapping, Any, List, Optional
 # import here to avoid requiring psycopg2 unless this function is used
 def insert_rejected_emails(rows: Iterable[Mapping[str, Any]]) -> List[int]:
     """
@@ -176,8 +174,6 @@ def insert_rejected_email_row(
         notes TEXT,
         received_at TIMESTAMPTZ,
         processed_at TIMESTAMPTZ,
-        created_at TIMESTAMPTZ DEFAULT NOW(),
-        updated_at TIMESTAMPTZ DEFAULT NOW()
       )
     """
     sql = """
@@ -484,4 +480,4 @@ def fetch_authorized_sender_emails(active_only: bool = True) -> List[str]:
 
     return emails
 
-# insert_authorized_senders(VERIFIED_SENDERS)
+insert_authorized_senders(VERIFIED_SENDERS)

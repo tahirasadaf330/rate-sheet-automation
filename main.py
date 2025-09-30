@@ -26,7 +26,7 @@ from datetime import datetime, timezone
 from database import insert_rate_upload, bulk_insert_rate_upload_details, push_failed_emails_json_to_db
 import pandas as pd
 from typing import Any 
-from valid_emails import refresh_verified_senders
+# from valid_emails import refresh_verified_senders
 
 
  
@@ -85,6 +85,8 @@ def process_all_directories(attachments_base="attachments"):
             print(f"[WARN] No company found in {meta_file}, skipping...")
             continue
 
+        print('DEBUG: Running JeraSoft export for:', company, '| subject:', subject, '| prefix:', prefix)
+
         # Extract directory and attachments
         dir_path = meta.get("directory")
         attachments = meta.get("attachments", [])
@@ -104,6 +106,7 @@ def process_all_directories(attachments_base="attachments"):
 
         info = None
         try:
+            print("DEBUG: Calling export_rates_by_query...")
             info = export_rates_by_query(company, output_path, subject, prefix_code=prefix)
             print(info)
 
@@ -158,6 +161,7 @@ def process_all_directories(attachments_base="attachments"):
         if info is None:
             print(f"[SKIP] {company} not exported; moving on.")
 
+print('\n\nDEBUG: Running JeraSoft export on all directories in attachments/...\n\n')
 process_all_directories()
 
 #_______________ Preprocess Script _____________
@@ -457,19 +461,7 @@ def compare_preprocessed_folders(
                 continue
 
             try:
-                # right_df = read_table(str(v), sheet_right)
-                # result, stats = compare(left_df, right_df, as_of_date, notice_days, rate_tol)
-
-                # # NEW: always name by vendor file + "_comparision_difference.xlsx"
-                # out_path = folder / f"{v.stem}_comparision_result.xlsx"
-
-                # write_excel(result, str(out_path))
-                # writes += 1
-                # comp_result[vname] = True
-                # print(f"    ✔ wrote {out_path} ({len(result)} rows)")
-
-
-
+            
                 right_df = read_table(str(v), sheet_right)
                 result, stats = compare(left_df, right_df, as_of_date, notice_days, rate_tol)
 
@@ -636,6 +628,12 @@ def push_rejections_from_metadata(attachments_root: str | Path) -> tuple[int, in
                     parts.append(f"{k}=unknown rows")
             joined = ", ".join(parts) if parts else "no detail"
             notes = f"Preprocessing produced small outputs (<100 rows): {joined}."
+        
+        # 5) Handle 'keyword_error' flag for company name issues
+        if not category and meta.get("keyword_error"):
+            category = "company_name_error"
+            keyword_error_msg = meta.get("keyword_error")
+            notes = f"Company name error: {keyword_error_msg}"
 
         # If nothing to report, skip
         if not category:
@@ -1011,6 +1009,6 @@ def push_all_ok_results(attachments_root: str | Path) -> Tuple[int, int, int]:
 push_rejections_from_metadata("attachments")
 
 push_all_ok_results(ATTACHMENTS_ROOT)
-# from database import push_failed_emails_json_to_db
+
 push_failed_emails_json_to_db("failed_emails.json")  # or leave empty to use default path
 

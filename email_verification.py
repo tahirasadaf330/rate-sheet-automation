@@ -21,6 +21,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Set, Tuple, Optional, List, Dict
 
+# from valid_emails import VERIFIED_SENDERS  as verified_senders
+
 import requests
 from msal import ConfidentialClientApplication
 from dotenv import load_dotenv
@@ -117,18 +119,10 @@ def log_failed_email(reason: str, payload: dict) -> None:
 
     # dedupe by Graph id first, then by internetMessageId if provided
     dedupe_key = payload.get("id") or payload.get("internetMessageId")
-    # if not _entry_exists(bucket, dedupe_key):
-    #     bucket.append(payload)
-    #     # update totals
-    #     totals[reason] = int(totals.get[reason] if isinstance(totals.get(reason), int) else 0) + 1 if False else totals[reason] + 1
-    #     totals["all"] = totals.get("all", 0) + 1
 
     if not _entry_exists(bucket, dedupe_key):
         bucket.append(payload)
-        # update totals safely
-        # totals[reason] = totals.get(reason, 0) + 1
-        # totals["all"] = totals.get("all", 0) + 1
-
+  
 
     data["last_updated_utc"] = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
     _atomic_write_failed_log(data)
@@ -842,7 +836,7 @@ def verify_fetch_emails(after: str, before: str, unread_only: bool = True) -> No
     cfg = load_env()
 
     # build the verified set here (fresh every run)
-    verified_senders = get_verified_senders()              # fetch from DB
+    verified_senders = get_verified_senders()    
     verified_set = {e.lower().strip() for e in verified_senders}
    
     page_size = 50                    # number of messages per API call

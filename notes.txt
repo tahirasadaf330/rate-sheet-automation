@@ -1,39 +1,17 @@
 Quickcom tel com PRM trunk Prefix:001 USD
 
-- still there are some files whoes number of rows is showed wrongly even by the openpxl so you might have to setup a way by which you open the files 
-on the server to recalculate the valid range progmatically...
-
-
-
 
 Questions to ask
-
-the company name allip does not exist 
-
-right now we are removing the the zero if there are three billing increment
-values like 1/0/1 it will become 1/1 etc.. is it valid?
-
-does the code names remains same like in same as in the jerasoft or they kept changing like for now we are just fetching the code names from the
-jerasoft as the col name is consistent.
 
 
 ==================================
 
 to do
 
-also do push the comparison result in case of failed emails
 
 ===================================
 
 issues
-
-some time the header is not getting red by the code if you open the file and expand thoes cols then it works check that stuff.
-
--there is some calculate_dimension error fix that
--plus jerasoft files are being returned empty check that too (C:\Users\User\OneDrive - Hayo Telecom, Inc\Documents\Work\Rate Sheet Automation\rate-sheet-automation\attachments_new\rates_at_airontel.com_20250911_161838)
--add a new category in the failed emails which also shows the details regarding the files where email process has been incomplete let say preprocessing was not completed etc..
-
-
 
 
 ==============================
@@ -41,21 +19,9 @@ some time the header is not getting red by the code if you open the file and exp
 
 future considerations
 
-set alerts that will show up on dashboards if there is an issue like too much of 
-data or too less or the file from jerasoft is fetched empty which can tell the 
-rate team to manaually handle the case.
-
 
 track the emails that have been processed so the system wont process them again
 like by keeping a meta file etc...
 
 see the serach time complexity in both cases.
 
-- in header searching code stop the searchin if the 
-code passes first 1000 rows that usually means there
-is no matching.
-
-check in the alkaip files the two rates columns are causing the issue.
-might be due to your similar word matching God knows
-
-it takes too long to push data to db try to make it fast.

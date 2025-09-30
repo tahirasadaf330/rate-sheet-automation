@@ -245,34 +245,6 @@ def _raw_from_excel_pandas(path: str, sheet) -> pd.DataFrame:
     # If both engines failed, bubble up the last exception
     raise last_exc if last_exc else RuntimeError("read_excel failed without an exception?")
 
-
-# def _read_raw_matrix(path: str, sheet=0) -> pd.DataFrame:
-#     ext = os.path.splitext(path)[1].lower()
-#     if ext in ('.xlsx', '.xlsm', '.xls'):
-#         wb = load_workbook(path, data_only=True, read_only=True)
-
-#         # try requested sheet first, then all others
-#         try_order = []
-#         if isinstance(sheet, int) and 0 <= sheet < len(wb.worksheets):
-#             try_order.append(sheet)
-#         elif isinstance(sheet, str):
-#             try_order += [i for i, ws in enumerate(wb.worksheets) if ws.title == sheet]
-
-#         try_order += [i for i in range(len(wb.worksheets)) if i not in try_order]
-
-#         for i in try_order:
-#             raw = _raw_from_ws(wb.worksheets[i])
-#             try:
-#                 _ = detect_header_row(raw)  # will raise if not found
-#                 return raw  # this sheet has the headers; use it
-#             except ValueError:
-#                 continue
-
-#         raise ValueError("No sheet contains all required headers.")
-#     else:
-#         return pd.read_csv(path, header=None, dtype=str)
-
-
 def _read_raw_matrix(path: str, sheet=0) -> pd.DataFrame:
     ext = os.path.splitext(path)[1].lower()
     if ext in ('.xlsx', '.xlsm', '.xls'):
@@ -325,96 +297,6 @@ def _read_raw_matrix(path: str, sheet=0) -> pd.DataFrame:
         raise ValueError("No sheet contains all required headers.")
     else:
         return pd.read_csv(path, header=None, dtype=str)
-
-
-# ---- Header detection (instrumented) ----
-# def detect_header_row(raw: pd.DataFrame) -> int:
-#     """
-#     Find the row index that, after normalization + alias mapping,
-#     contains ALL required canonical columns.
-#     Prints detailed debug info so you can see what failed.
-
-#     Relies on:
-#       - REQUIRED_COLS: list of canonical column names
-#       - _norm(s): normalizer function
-#       - ALIAS_MAP: dict of normalized header -> canonical name
-#     """
-#     targets = set(REQUIRED_COLS)
-
-#     best_count = -1
-#     best_row = -1
-#     best_covered = set()
-
-#     for idx, row in raw.iterrows():
-#         # raw cell texts on this row (skip NaN)
-#         cells = [x for x in row if pd.notna(x)]
-#         precleaned = [_preclean_header_token(x) for x in cells]
-#         normed = [_norm(x) for x in precleaned]
-#         mapped = [ALIAS_MAP.get(n) or _match_alias_substring(n) for n in normed]
-
-#         covered = {m for m in mapped if m}
-#         ###################
-#         # ---------- tolerate missing Billing Increment if related headers exist ----------
-#         if 'Billing Increment' not in covered:
-#             norm_set = set(normed)
-
-#             def _has_key(key: str) -> bool:
-#                 # fuzzy: exact, prefix, suffix, or underscore-delimited infix
-#                 return any(
-#                     n == key
-#                     or n.startswith(key + '_')
-#                     or n.endswith('_' + key)
-#                     or ('_' + key + '_') in ('_' + n + '_')
-#                     for n in norm_set
-#                 )
-
-#             # Pairs allow perfect synthesis later
-#             pair_hit = any(_has_key(a) and _has_key(b) for (a, b) in BILLING_PAIRS)
-
-#             # Singles are also enough, because _synthesize_billing_increment can duplicate a single
-#             singles = ['initial_period', 'min_bill', 'first_increment', 'increment']
-#             single_hit = any(_has_key(k) for k in singles)
-
-#             if pair_hit or single_hit:
-#                 covered.add('Billing Increment')
-
-#             dbg("  billing_pair_hit:", pair_hit, "singles_hit:", single_hit,
-#                 "pairs_checked:", BILLING_PAIRS, "singles_checked:", singles)
-#         # -----------------------------------------------------------------------------
-#         ##################
-
-#         missing = targets - covered
-
-#         # DEBUG dump
-#         dbg(f"[hdr-scan] row={idx}")
-#         dbg("  cells:", [repr(x) for x in cells])
-#         dbg("  precleaned:", [repr(x) for x in precleaned])
-#         dbg("  normed:", normed)
-#         dbg("  mapped:", mapped)
-#         if missing:
-#             dbg("  still-missing:", sorted(missing))
-#         else:
-#             dbg(f"[hdr-scan] FOUND header row -> {idx}")
-#             return idx
-
-#         # track best partial coverage to help when failing
-#         if len(covered & targets) > best_count:
-#             best_count = len(covered & targets)
-#             best_row = idx
-#             best_covered = covered & targets
-
-#     # If we got here, we failed. Print the best candidate with codepoints.
-#     dbg(f"[hdr-scan] best coverage: {best_count} on row {best_row} -> {sorted(best_covered)}")
-#     if best_row != -1:
-#         best_cells = [x for x in raw.iloc[best_row] if pd.notna(x)]
-#         dbg("[hdr-scan] best row cells (repr):", [repr(x) for x in best_cells])
-#         dbg("[hdr-scan] best row cells (_norm):", [_norm(x) for x in best_cells])
-#         dbg("[hdr-scan] best row cells (codepoints):", [_codepoints(str(x)) for x in best_cells])
-
-#     raise ValueError(
-#         "Header not found. None of the rows contained all required columns "
-#         f"after normalization/aliasing. Required: {REQUIRED_COLS}"
-#     )
 
 # In the detect_header_row function:
 def detect_header_row(raw: pd.DataFrame) -> int:
@@ -611,83 +493,6 @@ def _match_alias_substring(normalized_key: str, alias_map: dict = ALIAS_MAP_NORM
 
 #################################################
 
-# def _canonicalize_headers(df: pd.DataFrame) -> pd.DataFrame:
-#     original = list(df.columns)
-
-#     # 1) Preclean labels (kill $, €, USD, etc.)
-#     preclean_map = {c: _preclean_header_token(c) for c in original}
-#     # 2) Normalize
-#     norm_map = {c: _norm(preclean_map[c]) for c in original}
-#     # 3) Strip currency words that survived normalization (e.g., rate_usd -> rate)
-#     key_map = {c: _strip_currency_words_from_key(norm_map[c]) for c in original}
-#     # 4) Alias lookup on the final key
-
-#     alias_hit = {}
-#     for c in original:
-#         key = key_map[c]  # already precleaned+normalized version of c
-#         hit = ALIAS_MAP.get(key)
-#         if not hit:
-#             # fallback: alias substring match on the normalized key
-#             hit = _match_alias_substring(key)
-#         alias_hit[c] = hit
-
-
-#     # DEBUG
-#     dbg("[canon] original -> preclean -> norm -> key_strip -> alias:")
-#     for c in original:
-#         dbg(f"  {repr(c)}  ->  {repr(preclean_map[c])}  ->  {norm_map[c]}  ->  {key_map[c]}  ->  {alias_hit[c]}")
-#         if not alias_hit[c]:
-#             dbg("    codepoints(original):", _codepoints(c))
-
-#     # If alias matches, use canonical; otherwise keep the cleaned label
-#     mapped = {c: (alias_hit[c] if alias_hit[c] else preclean_map[c]) for c in original}
-#     df = df.rename(columns=mapped)
-
-#     # ---------- NEW: tolerate missing Billing Increment if a known pair exists ----------
-#     missing = [c for c in REQUIRED_COLS if c not in df.columns]
-
-#     if 'Billing Increment' in missing:
-#         # normalize the CURRENT df.columns (post-rename) for fuzzy matching
-#         normed_current = {_norm(_preclean_header_token(c)) for c in df.columns}
-
-#         def _has_key(key: str) -> bool:
-#             # fuzzy: exact, prefix, suffix, or underscore-delimited infix
-#             return any(
-#                 n == key or
-#                 n.startswith(key + '_') or
-#                 n.endswith('_' + key) or
-#                 ('_' + key + '_') in ('_' + n + '_')
-#                 for n in normed_current
-#             )
-
-#         pair_hit = any(_has_key(a) and _has_key(b) for (a, b) in BILLING_PAIRS)
-#         dbg("[canon] billing_pair_hit:", pair_hit, "pairs_checked:", BILLING_PAIRS)
-
-#         if pair_hit:
-#             # don’t count BI as missing; create placeholder so later selection won’t crash
-#             missing = [m for m in missing if m != 'Billing Increment']
-#             if 'Billing Increment' not in df.columns:
-#                 df['Billing Increment'] = ''   # _synthesize_billing_increment will fill this later
-#             dbg("[canon] Billing Increment satisfied via header pair; will synthesize values later.")
-#     # -----------------------------------------------------------------------------------
-
-#     # Final guard
-#     if missing:
-#         dbg("[canon] df.columns:", list(df.columns))
-#         dbg("[canon] missing required:", missing)
-#         dbg("[canon] precleaned originals:", preclean_map)
-#         dbg("[canon] normalized originals:", norm_map)
-#         dbg("[canon] stripped keys:", key_map)
-#         raise ValueError(
-#             "Missing required columns: "
-#             f"{missing}. Found headers: {original}. "
-#             f"Precleaned: {preclean_map}. "
-#             f"Normalized: {norm_map}. "
-#             f"Stripped keys: {key_map}. "
-#             "Add more variants to ALIAS_MAP or harden _norm/_preclean_header_token."
-#         )
-#     return df
-
 def _canonicalize_headers(df: pd.DataFrame) -> pd.DataFrame:
     original = list(df.columns)
 
@@ -772,7 +577,6 @@ def _canonicalize_headers(df: pd.DataFrame) -> pd.DataFrame:
             "Add more variants to ALIAS_MAP or harden _norm/_preclean_header_token."
         )
     return df
-
 
 
 # ──────────────────────────────── footer ─────────────────────────────────
@@ -887,17 +691,6 @@ def normalise_date_any(val) -> pd.Timestamp:
             continue
 
     return pd.NaT
-
-# def clean_billing_increment(val) -> str:
-#     if pd.isna(val):
-#         return ''
-#     nums = re.findall(r'\d+', str(val))
-#     if len(nums) == 1:
-#         n = int(nums[0]); return f"{n}/{n}"
-#     if len(nums) >= 2:
-#         a, b = int(nums[-2]), int(nums[-1])
-#         return f"{a}/{b}"
-#     return ''
 
 def clean_billing_increment(val) -> str:
     """

@@ -9,9 +9,6 @@ COL_EDATE = "Effective Date"
 COL_BI = "Billing Increment"
 COL_NAME = "Dst Code Name"
 
-
-# OUT_COLS = ["Code", "Dst Code Name", "Old Rate", "New Rate", "Effective Date", "Status", "Change Type", "Notes"]
-
 OUT_COLS = [
     "Code", "Dst Code Name",
     "Old Rate", "New Rate",
@@ -29,13 +26,6 @@ def read_table(path: str, sheet: Optional[str] = None) -> pd.DataFrame:
     else:
         raise ValueError(f"Unsupported file type: {ext}")
     
-
-    # expected = [COL_CODE, COL_RATE, COL_EDATE, COL_BI]
-    # missing = [c for c in expected if c not in df.columns]
-    # if missing:
-    #     raise ValueError(f"Missing expected columns {missing} in {path}. Found: {list(df.columns)}")
-    # df = df[expected].copy()
-
 
     #########################
     # Adding other code name col
@@ -177,10 +167,6 @@ def compare(left: pd.DataFrame, right: pd.DataFrame, as_of_date: Optional[str], 
                     else name_plain if isinstance(name_plain, str) and name_plain.strip()
                     else None)
 
-
-
-
-
         # Billing Increment (old/new)
         bi_old = r.get(f"{COL_BI}_old")
         bi_new = r.get(f"{COL_BI}_new")
@@ -195,9 +181,6 @@ def compare(left: pd.DataFrame, right: pd.DataFrame, as_of_date: Optional[str], 
         bi_new = _clean_bi(bi_new)
 
         ########################
-
-        # print(f"\n--- Row {i} | Code={code} ---")
-        # print(f" OldRate={o_rate}, NewRate={n_rate}, EffDate={n_date}, BI_old={r.get(f'{COL_BI}_old')}, BI_new={r.get(f'{COL_BI}_new')}")
 
         if right_only[i]:
             print(" → Detected as NEW")
@@ -224,14 +207,6 @@ def compare(left: pd.DataFrame, right: pd.DataFrame, as_of_date: Optional[str], 
         if invalid:
             print(f"   Validation issues: {left_reasons + right_reasons}")
 
-        # if bi_changed[i]:
-        #     print(" → Billing Increment changed")
-        #     change_type = "Billing Increments Changes"
-        #     status = "Rejected"
-        #     notes.append("billing increment changed")
-        #     if can_compare_rate[i] and not np.isclose(n_rate, o_rate, atol=rate_tol):
-        #         notes.append("rate changed")
-        
 #################################
 # Changed to tackle the status rejected issue
 ################################
