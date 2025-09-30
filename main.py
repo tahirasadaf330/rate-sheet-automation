@@ -25,7 +25,8 @@ from typing import Iterable, Tuple, Optional, Dict, Any, List
 from datetime import datetime, timezone
 from database import insert_rate_upload, bulk_insert_rate_upload_details, push_failed_emails_json_to_db
 import pandas as pd
-from typing import Any 
+from typing import Any
+from database import insert_rejected_email_row  
 # from valid_emails import refresh_verified_senders
 
 
@@ -161,14 +162,13 @@ def process_all_directories(attachments_base="attachments"):
         if info is None:
             print(f"[SKIP] {company} not exported; moving on.")
 
-print('\n\nDEBUG: Running JeraSoft export on all directories in attachments/...\n\n')
 process_all_directories()
 
 #_______________ Preprocess Script _____________
 
 ALLOWED_EXTS = {".xlsx", ".xls", ".csv"}
 
-def iter_preprocessed_dirs(attachments_root: Path):
+def iter_preprocessed_dirs_(attachments_root: Path):
     """
     Yield directories under attachments_root whose metadata.json has "jerasoft_preprocessed": true.
     """
@@ -189,6 +189,7 @@ def iter_preprocessed_dirs(attachments_root: Path):
             results = data.get("preprocessed_results", {})
             if not results or any(v is False for v in results.values()):
                 yield child
+
 
 def files_to_clean(folder: Path):
     """
@@ -219,7 +220,7 @@ def clean_preprocessed_folders(attachments_dir: str | Path):
     files_done = 0
 
     print("\n=== Cleaning pass over jerasoft_preprocessed folders ===")
-    for folder in iter_preprocessed_dirs(root):
+    for folder in iter_preprocessed_dirs_(root):
         folders_done += 1
         print(f"\n[FOLDER] {folder}")
 
@@ -242,7 +243,7 @@ def clean_preprocessed_folders(attachments_dir: str | Path):
             try:
                 in_path = str(file_path)
                 out_path = str(file_path)   # same path -> overwrite in place
-                print(f"  - Cleaning: {file_path.name}")
+                print(f"  - Cleaning: {file_path}")
                 cleaned_df = load_clean_rates(in_path, out_path, 0)
                 files_done += 1
                 print(f"    ✔ cleaned -> {file_path}")
@@ -282,8 +283,6 @@ def clean_preprocessed_folders(attachments_dir: str | Path):
     return folders_done, files_done
 
 clean_preprocessed_folders("attachments")
-
-
 
 #________________ Ratesheet Comparision Script _____________
 
@@ -512,10 +511,7 @@ def compare_preprocessed_folders(
 
 compare_preprocessed_folders("attachments", notice_days=7, rate_tol=0.0001)  #check the difference upto 4 decimal places.
 
-###############################################
 ##############################################
-
-from database import insert_rejected_email_row  # add this import at the top with others
 
 def push_rejections_from_metadata(attachments_root: str | Path) -> tuple[int, int]:
     """

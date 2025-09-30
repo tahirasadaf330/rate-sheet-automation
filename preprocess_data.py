@@ -21,7 +21,7 @@ BILLING_PAIRS = [
 
 EXCEL_EPOCH = datetime(1899, 12, 30)          # Excel’s epoch (PC versions)
 
-DEBUG = True
+DEBUG = False
 def dbg(*a, **k):
     if DEBUG:
         print(*a, **k)
@@ -252,6 +252,7 @@ def _read_raw_matrix(path: str, sheet=0) -> pd.DataFrame:
         if ext == '.xls':
             try:
                 raw_pd = _raw_from_excel_pandas(path, sheet if sheet is not None else 0)
+                print("DEBUG: Gotcha using the read excel pandas method")
                 return raw_pd
             except Exception:
                 # fall through to the openpyxl loop anyway, in case the file is misnamed
@@ -288,11 +289,14 @@ def _read_raw_matrix(path: str, sheet=0) -> pd.DataFrame:
             # -------------------------------------------------------------
 
             try:
+                print('\n\nDEBUG: Calling the detect header row function from read_raw_matrix\n\n')
                 _ = detect_header_row(chosen)  # will raise if not found
+                wb.close()
+                print("\n\nDEBUG: Gotcha using the read excel openpyxl method")
                 return chosen  # this sheet has the headers; use it
             except ValueError:
+                print("\n\nDEBUG: Failed the detect_header_row check")
                 continue
-
 
         raise ValueError("No sheet contains all required headers.")
     else:
@@ -324,6 +328,11 @@ def detect_header_row(raw: pd.DataFrame) -> int:
         mapped = [ALIAS_MAP.get(n) or _match_alias_substring(n) for n in normed]
 
         covered = {m for m in mapped if m}
+        
+        if idx <=10:
+            print(f"DEBUG TARGETS: {targets}")
+            print("DEBUG IN THE DETECT HEADER ROW: covered so far", covered)
+
         ###################
         # ---------- tolerate missing Billing Increment if related headers exist ----------
         if 'Billing Increment' not in covered:
@@ -745,6 +754,7 @@ def load_clean_rates(path: str, output_path: str, sheet=None) -> pd.DataFrame:
     # 1) raw grid
     raw = _read_raw_matrix(path, sheet=sheet)
 
+    print('\n\nDEBUG: Calling the detect header row function from load_clean_rates\n\n')
     # 2) detect header row in the raw grid
     header_row_idx = detect_header_row(raw)
 
@@ -804,6 +814,13 @@ def load_clean_rates(path: str, output_path: str, sheet=None) -> pd.DataFrame:
         .str.replace(r'\D+', '', regex=True)  # keep only 0-9
     )
 
+
+    if "jerasoft" in str(path).lower():
+        # make sure "Dst Code" is included exactly once, remove "Dst Code Name" if it's in REQUIRED_COLS
+        if "Dst Code Name" in REQUIRED_COLS:
+            REQUIRED_COLS.remove("Dst Code Name")
+
+
     # finally, write the cleaned sheet
     out_path, writer_kwargs = _normalize_excel_writer_path(output_path)
     df.to_excel(out_path, index=False, **writer_kwargs)
@@ -811,8 +828,9 @@ def load_clean_rates(path: str, output_path: str, sheet=None) -> pd.DataFrame:
 
 # ──────────────────────────── quick test ─────────────────────────────────────
 if __name__ == '__main__':
-    FILE_PATH = r'C:\Users\User\OneDrive - Hayo Telecom, Inc\Documents\Work\Rate Sheet Automation\rate-sheet-automation\attachments_new\rates_at_alkaip.com_20250925_170142\R_A_HAYO_TELECOM_INC_092525.xlsx'
-    OUTPUT_FILE_PATH = r'C:\Users\User\OneDrive - Hayo Telecom, Inc\Documents\Work\Rate Sheet Automation\rate-sheet-automation\attachments_new\rates_at_alkaip.com_20250925_170142\R_A_HAYO_TELECOM_INC_092525.xlsx'
+    PATH = r'C:\Users\User\OneDrive - Hayo Telecom, Inc\Documents\Work\Rate Sheet Automation\rate-sheet-automation\attachments\rates_at_voxmaster.com_20250925_112716\Standard_Full_Price_List_25.09.2025_jerasoft_comparison.xlsx'
+    FILE_PATH = PATH
+    OUTPUT_FILE_PATH = PATH
     cleaned = load_clean_rates(FILE_PATH, OUTPUT_FILE_PATH, 0)
    
     print('✅ Cleaned and saved.')

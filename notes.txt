@@ -8,6 +8,7 @@ Questions to ask
 
 to do
 
+jerasoft cleaning is failing see why?
 
 ===================================
 
