@@ -220,7 +220,7 @@ def push_failed_emails_json_to_db(path: Optional[str | Path] = None) -> tuple[in
     inserted = 0
     skipped = 0
     errors = 0
-
+    print(f"DEBUG: Pushing failed emails from {json_path}, categories: {list(buckets.keys())}")
     # Prepare a list of rows to bulk-insert and keep references to the original entries
     rows_to_insert: list[dict] = []
     entry_refs: list[dict] = []

@@ -37,11 +37,11 @@ FAILED_EMAILS_PATH = Path(__file__).with_name("failed_emails.json")
 
 #_____________ Email Verification Script_____________
 
-# after = "2025-09-29"              # only include emails on/after this date (YYYY-MM-DD) or None     "2025-08-29"
-# before = None       # only include emails on/before this date (YYYY-MM-DD) or None
-# unread_only = False    
-# ATTEMPTS = 2
-# verify_fetch_emails(after, before, unread_only)
+after = "2025-09-29"              # only include emails on/after this date (YYYY-MM-DD) or None     "2025-08-29"
+before = None       # only include emails on/before this date (YYYY-MM-DD) or None
+unread_only = False    
+ATTEMPTS = 2
+verify_fetch_emails(after, before, unread_only)
 
 #_______________ Jerasoft Script _____________
 
@@ -526,6 +526,7 @@ def push_rejections_from_metadata(attachments_root: str | Path) -> tuple[int, in
 
     Returns: (folders_scanned, rows_inserted)
     """
+    print("\n=== Pushing rejected emails from metadata.json files ===")
     root = Path(attachments_root).expanduser().resolve()
     if not root.exists():
         raise FileNotFoundError(f"Attachments directory not found: {root}")
@@ -896,13 +897,117 @@ def compute_upload_stats(dfs: List[pd.DataFrame]) -> Dict[str, int]:
     }
 
 
+# def push_all_ok_results(attachments_root: str | Path) -> Tuple[int, int, int]:
+#     """
+#     For each folder whose metadata compar(i)son_result.result == 'ok':
+#       - insert into rate_uploads (sender, received_at, meta_data)
+#       - read every file ending with *_comparision_result.{xlsx|xls|csv}
+#       - bulk insert rows into rate_upload_details
+#       - update metadata.json -> results_pushed[filename] = True/False
+#     Returns: (folders_processed, files_processed, rows_inserted_total)
+#     """
+#     root = Path(attachments_root).expanduser().resolve()
+#     if not root.exists():
+#         raise FileNotFoundError(f"Attachments directory not found: {root}")
+
+#     folders_done = 0
+#     files_done = 0
+#     rows_total = 0
+
+#     print("\n=== DB push over OK comparison-result folders ===")
+#     for child in sorted(root.iterdir()):
+#         if not child.is_dir():
+#             continue
+
+#         meta = load_metadata(child)
+#         if not meta or not comparison_result_ok(meta):
+#             continue
+
+#         # Get meta_data
+#         meta_data = meta.get("meta_data")  # Assuming metadata is stored here
+
+#         result_files = find_result_files(child)
+#         if not result_files:
+#             continue
+
+#         # Read all result files up-front for stats aggregation
+#         all_dfs: List[pd.DataFrame] = []
+#         for f in result_files:
+#             try:
+#                 df_tmp = read_comparison_table(f)
+#                 if not df_tmp.empty:
+#                     all_dfs.append(df_tmp)
+#             except Exception as e:
+#                 print(f"    ⚠ failed reading {f.name} for stats aggregation: {e}")
+
+#         stats_totals = compute_upload_stats(all_dfs)
+
+
+#         folders_done += 1
+#         print(f"\n[FOLDER] {child}")
+
+#         sender = str(meta.get("sender") or "").strip()
+#         received_at = parse_received_at(meta)
+
+#         subject = (meta.get("subject") or "").strip() or None
+#         processed_at = _parse_iso_utc_safe(meta.get("processed_at_utc"))
+#         meta_data = meta.get("meta_data") 
+
+#         try:
+#             upload_id = insert_rate_upload(
+#                 sender_email=sender or None,
+#                 subject=subject,
+#                 received_at=received_at,
+#                 processed_at=processed_at,
+#                 totals=stats_totals,
+#             )
+#         except Exception as e:
+#             print(f"  ✖ Failed to create rate_upload row: {e}")
+#             rp = meta.get("results_pushed") or {}
+#             for f in result_files:
+#                 if rp.get(f.name) is True:
+#                     continue
+#                 mark_results_pushed(child, f.name, False)
+#             continue
+
+#         # per-file skip for already-pushed
+#         rp = meta.get("results_pushed") or {}
+#         for f in result_files:
+#             if rp.get(f.name) is True:
+#                 print(f"  - Skipping already pushed: {f.name}")
+#                 continue
+
+#             print(f"  - Processing {f.name}")
+#             try:
+#                 df = read_comparison_table(f)
+#                 if df.empty:
+#                     print("    ⚠ empty comparison file; nothing to push")
+#                     mark_results_pushed(child, f.name, "empty file no results to push to the data base")
+#                     continue
+#                 details = df_to_detail_dicts(df)
+#                 inserted = bulk_insert_rate_upload_details(upload_id, details)
+#                 rows_total += inserted
+#                 files_done += 1
+#                 print(f"    ✔ inserted {inserted} rows")
+#                 mark_results_pushed(child, f.name, True)
+#             except Exception as e:
+#                 print(f"    ✖ failed to insert from {f.name}: {e}")
+#                 mark_results_pushed(child, f.name, False)
+
+#     print("\n=== DB push summary ===")
+#     print(f"Folders processed: {folders_done}")
+#     print(f"Files processed:   {files_done}")
+#     print(f"Rows inserted:     {rows_total}")
+#     return folders_done, files_done, rows_total
+
 def push_all_ok_results(attachments_root: str | Path) -> Tuple[int, int, int]:
     """
-    For each folder whose metadata compar(i)son_result.result == 'ok':
-      - insert into rate_uploads (sender, received_at, meta_data)
-      - read every file ending with *_comparision_result.{xlsx|xls|csv}
-      - bulk insert rows into rate_upload_details
-      - update metadata.json -> results_pushed[filename] = True/False
+    Idempotent push:
+      - Only create a rate_uploads row if there is at least ONE result file that
+        has not been pushed yet AND has at least one row to insert.
+      - Process only files not previously marked as pushed in metadata.json.
+      - Mark results_pushed[filename] per file with True/False (or a string reason).
+
     Returns: (folders_processed, files_processed, rows_inserted_total)
     """
     root = Path(attachments_root).expanduser().resolve()
@@ -922,35 +1027,53 @@ def push_all_ok_results(attachments_root: str | Path) -> Tuple[int, int, int]:
         if not meta or not comparison_result_ok(meta):
             continue
 
-        # Get meta_data
-        meta_data = meta.get("meta_data")  # Assuming metadata is stored here
-
+        # Discover result files in this folder
         result_files = find_result_files(child)
         if not result_files:
             continue
 
-        # Read all result files up-front for stats aggregation
-        all_dfs: List[pd.DataFrame] = []
-        for f in result_files:
+        # Determine which files still need to be pushed (strict idempotency gate)
+        rp = meta.get("results_pushed") or {}
+        to_push = [f for f in result_files if rp.get(f.name) is not True]
+        if not to_push:
+            # Nothing left to do in this folder
+            continue
+
+        # Read only the files we plan to push (stats + pre-check for empties)
+        dfs_to_push: List[pd.DataFrame] = []
+        per_file_df: Dict[str, pd.DataFrame] = {}
+        for f in to_push:
             try:
                 df_tmp = read_comparison_table(f)
+                # Remember the DF even if empty so we can mark status later
+                per_file_df[f.name] = df_tmp
                 if not df_tmp.empty:
-                    all_dfs.append(df_tmp)
+                    dfs_to_push.append(df_tmp)
             except Exception as e:
                 print(f"    ⚠ failed reading {f.name} for stats aggregation: {e}")
+                per_file_df[f.name] = pd.DataFrame()  # treat as empty so it won't insert
 
-        stats_totals = compute_upload_stats(all_dfs)
+        # If every to_push DF is empty, don't create a parent record; just mark files
+        if not any((not d.empty) for d in per_file_df.values()):
+            for f in to_push:
+                mark_results_pushed(child, f.name, "empty file no results to push to the database")
+            # Nothing inserted, but we did meaningful work → count folder processed
+            folders_done += 1
+            print(f"\n[FOLDER] {child}")
+            print("  (All to-push files empty → no upload created)")
+            continue
 
+        # Aggregate stats from only the DFs that have rows
+        stats_totals = compute_upload_stats(dfs_to_push)
 
+        # Ready to create the parent upload row now (idempotent: only when there's work)
         folders_done += 1
         print(f"\n[FOLDER] {child}")
 
         sender = str(meta.get("sender") or "").strip()
-        received_at = parse_received_at(meta)
-
         subject = (meta.get("subject") or "").strip() or None
+        received_at = parse_received_at(meta)
         processed_at = _parse_iso_utc_safe(meta.get("processed_at_utc"))
-        meta_data = meta.get("meta_data") 
 
         try:
             upload_id = insert_rate_upload(
@@ -961,34 +1084,35 @@ def push_all_ok_results(attachments_root: str | Path) -> Tuple[int, int, int]:
                 totals=stats_totals,
             )
         except Exception as e:
+            # Parent failed → mark all to_push files as failed so we don't spin forever
             print(f"  ✖ Failed to create rate_upload row: {e}")
-            rp = meta.get("results_pushed") or {}
-            for f in result_files:
-                if rp.get(f.name) is True:
-                    continue
+            for f in to_push:
                 mark_results_pushed(child, f.name, False)
             continue
 
-        # per-file skip for already-pushed
-        rp = meta.get("results_pushed") or {}
-        for f in result_files:
-            if rp.get(f.name) is True:
-                print(f"  - Skipping already pushed: {f.name}")
-                continue
-
+        # Process only files that still need pushing
+        for f in to_push:
             print(f"  - Processing {f.name}")
             try:
-                df = read_comparison_table(f)
+                df = per_file_df.get(f.name)
+                if df is None:
+                    # Safety: read again if it wasn't cached
+                    df = read_comparison_table(f)
+
                 if df.empty:
                     print("    ⚠ empty comparison file; nothing to push")
-                    mark_results_pushed(child, f.name, "empty file no results to push to the data base")
+                    mark_results_pushed(child, f.name, "empty file no results to push to the database")
                     continue
+
                 details = df_to_detail_dicts(df)
+
+                # If you have a UNIQUE constraint on details, turn this into an UPSERT there.
                 inserted = bulk_insert_rate_upload_details(upload_id, details)
                 rows_total += inserted
                 files_done += 1
                 print(f"    ✔ inserted {inserted} rows")
                 mark_results_pushed(child, f.name, True)
+
             except Exception as e:
                 print(f"    ✖ failed to insert from {f.name}: {e}")
                 mark_results_pushed(child, f.name, False)
@@ -1005,5 +1129,5 @@ push_rejections_from_metadata("attachments")
 
 push_all_ok_results(ATTACHMENTS_ROOT)
 
-push_failed_emails_json_to_db("failed_emails.json")  # or leave empty to use default path
+push_failed_emails_json_to_db("failed_emails.json")  
 

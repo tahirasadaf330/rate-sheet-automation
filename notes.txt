@@ -26,3 +26,5 @@ like by keeping a meta file etc...
 
 see the serach time complexity in both cases.
 
+
+harden the case of recleaning once failed files everytime like add max 2 tries.
