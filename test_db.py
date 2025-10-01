@@ -2,6 +2,8 @@ import json
 from pathlib import Path
 from datetime import datetime
 from database import insert_rate_upload, _parse_iso_utc  # Import your functions
+from typing import Dict, Any  # Add these imports at the top of your file
+
 
 def _totals_from_stats(stats: Dict[str, Any]) -> Dict[str, int]:
     """
