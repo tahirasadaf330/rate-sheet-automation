@@ -959,7 +959,6 @@ def push_all_ok_results(attachments_root: str | Path) -> Tuple[int, int, int]:
                 received_at=received_at,
                 processed_at=processed_at,
                 totals=stats_totals,
-                meta_data=meta_data,
             )
         except Exception as e:
             print(f"  ✖ Failed to create rate_upload row: {e}")

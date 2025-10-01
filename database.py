@@ -327,7 +327,6 @@ def insert_rate_upload(
     received_at: Optional[datetime] = None,
     processed_at: Optional[datetime] = None,
     totals: Optional[Dict[str, int]] = None,
-    meta_data: Optional[Dict[str, Any]] = None,
 ) -> int:
     """
     Insert one row into rate_uploads with summary counters.
@@ -335,7 +334,7 @@ def insert_rate_upload(
     rate_uploads columns covered:
       subject, sender_email, received_at, processed_at,
       total_rows, new, increase, decrease, unchanged, closed,
-      backdated_increase, backdated_decrease, billing_increment_changes, meta_data
+      backdated_increase, backdated_decrease, billing_increment_changes
     """
     t = {
         "total_rows": 0,
@@ -356,12 +355,12 @@ def insert_rate_upload(
         (subject, sender_email, received_at, processed_at,
          total_rows, "new", increase, decrease, unchanged, closed,
          backdated_increase, backdated_decrease, billing_increment_changes,
-         created_at, updated_at, meta_data)
+         created_at, updated_at)
         VALUES
         (%s, %s, COALESCE(%s, NOW()), %s,
          %s, %s, %s, %s, %s, %s,
          %s, %s, %s,
-         NOW(), NOW(), %s)
+         NOW(), NOW())
         RETURNING id;
     """
 
@@ -382,7 +381,6 @@ def insert_rate_upload(
                 t["backdated_increase"],
                 t["backdated_decrease"],
                 t["billing_increment_changes"],
-                Json(meta_data) if meta_data is not None else None,
             ),
         )
         new_id = cur.fetchone()[0]
