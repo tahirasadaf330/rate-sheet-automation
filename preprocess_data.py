@@ -17,11 +17,12 @@ BILLING_PAIRS = [
     ('initial_increment', 'next_increment'),
     ('min_bill', 'billing_step'),
     ('first_increment', 'second_increment'),
+    ('first_increment', 'additional_increment'),
 ]
 
 EXCEL_EPOCH = datetime(1899, 12, 30)          # Excel’s epoch (PC versions)
 
-DEBUG = False
+DEBUG = True
 def dbg(*a, **k):
     if DEBUG:
         print(*a, **k)
@@ -178,6 +179,7 @@ def _synthesize_billing_increment(df: pd.DataFrame) -> pd.DataFrame:
         ('initial_increment', 'next_increment'),
         ('min_bill', 'billing_step'),
         ('first_increment', 'second_increment'),
+        ('first_increment', 'additional_increment'),
     ]
 
     for a, b in pairs:
@@ -222,43 +224,155 @@ def _raw_from_ws(ws) -> pd.DataFrame:
 
 
 
+# def _raw_from_excel_pandas(path: str, sheet) -> pd.DataFrame:
+#     """
+#     Read a sheet using pandas.read_excel so we bypass stale <dimension> metadata.
+#     Returns a raw grid (no headers assigned), dropping all-empty rows/columns.
+#     """
+#     # Try calamine first (handles xlsx/xls fast), then fall back to openpyxl.
+#     engines = ("calamine", "openpyxl")
+#     last_exc = None
+#     for eng in engines:
+#         try:
+#             df = pd.read_excel(path)
+#             # Normalize to your raw-grid shape, like _raw_from_ws
+#             df = pd.DataFrame(df)
+#             df.dropna(how="all", inplace=True)
+#             df.dropna(axis=1, how="all", inplace=True)
+#             df.reset_index(drop=True, inplace=True)
+#             return df.astype("string")
+#         except Exception as e:
+#             last_exc = e
+#             continue
+#     # If both engines failed, bubble up the last exception
+#     raise last_exc if last_exc else RuntimeError("read_excel failed without an exception?")
+
+# ── PATCH 1: make the pandas reader actually try multiple engines & the target sheet ──
 def _raw_from_excel_pandas(path: str, sheet) -> pd.DataFrame:
     """
-    Read a sheet using pandas.read_excel so we bypass stale <dimension> metadata.
+    Read a sheet using pandas.read_excel with multiple engines.
     Returns a raw grid (no headers assigned), dropping all-empty rows/columns.
     """
-    # Try calamine first (handles xlsx/xls fast), then fall back to openpyxl.
-    engines = ("calamine", "openpyxl")
+    import pandas as pd
+    engines = ("calamine", "openpyxl")  # try calamine first; fall back to openpyxl
     last_exc = None
     for eng in engines:
         try:
-            df = pd.read_excel(path)
-            # Normalize to your raw-grid shape, like _raw_from_ws
+            df = pd.read_excel(
+                path,
+                sheet_name=sheet if sheet is not None else 0,
+                engine=eng,
+                header=None,     # we want a raw grid
+                dtype=str
+            )
+            # If pandas returns a dict (when sheet_name=None), normalize to the first sheet
+            if isinstance(df, dict):
+                # pick the first item deterministically
+                first_key = sorted(df.keys())[0]
+                df = df[first_key]
+
             df = pd.DataFrame(df)
             df.dropna(how="all", inplace=True)
             df.dropna(axis=1, how="all", inplace=True)
             df.reset_index(drop=True, inplace=True)
             return df.astype("string")
         except Exception as e:
+            dbg(f"[pandas engine={eng}] read failed: {e}")
             last_exc = e
             continue
-    # If both engines failed, bubble up the last exception
-    raise last_exc if last_exc else RuntimeError("read_excel failed without an exception?")
+    raise last_exc if last_exc else RuntimeError("read_excel failed with both calamine and openpyxl")
 
+
+
+# def _read_raw_matrix(path: str, sheet=0) -> pd.DataFrame:
+#     ext = os.path.splitext(path)[1].lower()
+#     if ext in ('.xlsx', '.xlsm', '.xls'):
+#         # Optional: route legacy .xls straight to pandas, since openpyxl can't read BIFF .xls
+#         if ext == '.xls':
+#             try:
+#                 print("DEBUG: Trying the read excel pandas method")
+#                 raw_pd = _raw_from_excel_pandas(path, sheet if sheet is not None else 0)
+#                 print("DEBUG: Gotcha using the read excel pandas method")
+#                 return raw_pd
+#             except Exception:
+#                 # fall through to the openpyxl loop anyway, in case the file is misnamed
+#                 pass
+#         print("DEBUG: Trying the workbook method")
+#         wb = load_workbook(path, data_only=True, read_only=True)
+
+#         # try requested sheet first, then all others
+#         try_order = []
+#         if isinstance(sheet, int) and 0 <= sheet < len(wb.worksheets):
+#             try_order.append(sheet)
+#         elif isinstance(sheet, str):
+#             try_order += [i for i, ws in enumerate(wb.worksheets) if ws.title == sheet]
+
+#         try_order += [i for i in range(len(wb.worksheets)) if i not in try_order]
+
+#         for i in try_order:
+#             raw_stream = _raw_from_ws(wb.worksheets[i])
+
+#             # --- NEW: fallback trigger happens BEFORE header detection ---
+#             chosen = raw_stream
+#             if raw_stream.shape[0] < ROW_FALLBACK_THRESHOLD:
+#                 try:
+#                     raw_pd = _raw_from_excel_pandas(path, i)  # same sheet index
+#                     if raw_pd.shape[0] > raw_stream.shape[0]:
+#                         dbg(f"[excel-fallback] streaming rows={raw_stream.shape[0]} < {ROW_FALLBACK_THRESHOLD}; "
+#                             f"pandas rows={raw_pd.shape[0]} -> using pandas for sheet #{i}")
+#                         chosen = raw_pd
+#                     else:
+#                         dbg(f"[excel-fallback] streaming rows={raw_stream.shape[0]} < {ROW_FALLBACK_THRESHOLD}; "
+#                             f"pandas rows={raw_pd.shape[0]} not larger -> keeping streaming for sheet #{i}")
+#                 except Exception as e:
+#                     dbg(f"[excel-fallback] pandas read failed on sheet #{i}: {e}")
+#             # -------------------------------------------------------------
+
+#             try:
+#                 print('\n\nDEBUG: Calling the detect header row function from read_raw_matrix\n\n')
+#                 _ = detect_header_row(chosen)  # will raise if not found
+#                 wb.close()
+#                 print("\n\nDEBUG: Gotcha using the read excel openpyxl method")
+#                 return chosen  # this sheet has the headers; use it
+#             except ValueError:
+#                 print("\n\nDEBUG: Failed the detect_header_row check")
+#                 continue
+
+#         raise ValueError("No sheet contains all required headers.")
+#     else:
+#         return pd.read_csv(path, header=None, dtype=str)
+
+
+# ── PATCH 2: strengthen _read_raw_matrix to try pandas when there are 0 worksheets
+#             and as a final fallback when header detection fails on all sheets. ──
 def _read_raw_matrix(path: str, sheet=0) -> pd.DataFrame:
     ext = os.path.splitext(path)[1].lower()
     if ext in ('.xlsx', '.xlsm', '.xls'):
         # Optional: route legacy .xls straight to pandas, since openpyxl can't read BIFF .xls
         if ext == '.xls':
             try:
+                print("DEBUG: Trying the read excel pandas method (.xls fast path)")
                 raw_pd = _raw_from_excel_pandas(path, sheet if sheet is not None else 0)
-                print("DEBUG: Gotcha using the read excel pandas method")
+                print("DEBUG: Gotcha using the read excel pandas method (.xls fast path)")
                 return raw_pd
             except Exception:
                 # fall through to the openpyxl loop anyway, in case the file is misnamed
                 pass
 
+        print("DEBUG: Trying the workbook method")
         wb = load_workbook(path, data_only=True, read_only=True)
+
+        # If there are ZERO normal worksheets (chartsheet-only, corrupted, or placeholder),
+        # try a pandas fallback immediately.
+        if len(wb.worksheets) == 0:
+            dbg("[excel] 0 worksheets detected by openpyxl → trying pandas fallback")
+            try:
+                raw_pd = _raw_from_excel_pandas(path, sheet if sheet is not None else 0)
+                wb.close()
+                return raw_pd
+            except Exception as e:
+                wb.close()
+                raise ValueError(f"No worksheets found and pandas fallback failed: {e}")
 
         # try requested sheet first, then all others
         try_order = []
@@ -266,13 +380,27 @@ def _read_raw_matrix(path: str, sheet=0) -> pd.DataFrame:
             try_order.append(sheet)
         elif isinstance(sheet, str):
             try_order += [i for i, ws in enumerate(wb.worksheets) if ws.title == sheet]
-
         try_order += [i for i in range(len(wb.worksheets)) if i not in try_order]
+
+        # helper: pandas-all-sheets fallback (even when row count >= threshold)
+        def _try_pandas_all_sheets():
+            for j in range(len(wb.worksheets)):
+                try:
+                    raw_pd = _raw_from_excel_pandas(path, j)
+                    try:
+                        _ = detect_header_row(raw_pd)
+                        dbg(f"[excel-fallback] pandas finally found headers on sheet #{j}")
+                        return raw_pd
+                    except ValueError:
+                        continue
+                except Exception as e:
+                    dbg(f"[excel-fallback] pandas read failed on sheet #{j}: {e}")
+            return None
 
         for i in try_order:
             raw_stream = _raw_from_ws(wb.worksheets[i])
 
-            # --- NEW: fallback trigger happens BEFORE header detection ---
+            # Fallback trigger BEFORE header detection if the streaming read seems too short
             chosen = raw_stream
             if raw_stream.shape[0] < ROW_FALLBACK_THRESHOLD:
                 try:
@@ -286,7 +414,6 @@ def _read_raw_matrix(path: str, sheet=0) -> pd.DataFrame:
                             f"pandas rows={raw_pd.shape[0]} not larger -> keeping streaming for sheet #{i}")
                 except Exception as e:
                     dbg(f"[excel-fallback] pandas read failed on sheet #{i}: {e}")
-            # -------------------------------------------------------------
 
             try:
                 print('\n\nDEBUG: Calling the detect header row function from read_raw_matrix\n\n')
@@ -296,10 +423,19 @@ def _read_raw_matrix(path: str, sheet=0) -> pd.DataFrame:
                 return chosen  # this sheet has the headers; use it
             except ValueError:
                 print("\n\nDEBUG: Failed the detect_header_row check")
+                # don’t return yet; try other sheets
                 continue
 
-        raise ValueError("No sheet contains all required headers.")
+        # If we exhausted all openpyxl sheets without finding headers, try pandas across all sheets
+        dbg("[excel] openpyxl could not find headers on any sheet → trying pandas across all sheets")
+        raw_pd_any = _try_pandas_all_sheets()
+        wb.close()
+        if raw_pd_any is not None:
+            return raw_pd_any
+
+        raise ValueError("No sheet contains all required headers (openpyxl and pandas fallbacks failed).")
     else:
+        # Non-Excel → treat as CSV/TSV/etc.
         return pd.read_csv(path, header=None, dtype=str)
 
 # In the detect_header_row function:
@@ -462,6 +598,7 @@ ALIAS_MAP = {
     'billing_terms': 'Billing Increment',
     'increment': 'Billing Increment',
 }
+
 
 ##############################################
 # new code for handeling the junk that compes with the col names
@@ -775,14 +912,21 @@ def load_clean_rates(path: str, output_path: str, sheet=None) -> pd.DataFrame:
 
     # keep only canonical required columns
 
-    if "jerasoft" in str(path).lower():
-        # make sure "Dst Code" is included exactly once
-        if "Dst Code Name" not in REQUIRED_COLS:
-            REQUIRED_COLS.append("Dst Code Name")
-        df = df[REQUIRED_COLS].copy()
+    # if "jerasoft" in str(path).lower():
+    #     # make sure "Dst Code" is included exactly once
+    #     if "Dst Code Name" not in REQUIRED_COLS:
+    #         REQUIRED_COLS.append("Dst Code Name")
+    #     df = df[REQUIRED_COLS].copy()
 
-    else:
-        df = df[REQUIRED_COLS].copy()
+    # else:
+    #     df = df[REQUIRED_COLS].copy()
+
+    is_js = "jerasoft" in str(path).lower()
+    required_cols = list(REQUIRED_COLS)
+    if is_js and "Dst Code Name" not in required_cols:
+        required_cols = required_cols + ["Dst Code Name"]
+
+    df = df[required_cols].copy()
 
     # 5) clean fields
     # Dst Code: keep as string, strip; drop truly empty codes
@@ -815,10 +959,10 @@ def load_clean_rates(path: str, output_path: str, sheet=None) -> pd.DataFrame:
     )
 
 
-    if "jerasoft" in str(path).lower():
-        # make sure "Dst Code" is included exactly once, remove "Dst Code Name" if it's in REQUIRED_COLS
-        if "Dst Code Name" in REQUIRED_COLS:
-            REQUIRED_COLS.remove("Dst Code Name")
+    # if "jerasoft" in str(path).lower():
+    #     # make sure "Dst Code" is included exactly once, remove "Dst Code Name" if it's in REQUIRED_COLS
+    #     if "Dst Code Name" in REQUIRED_COLS:
+    #         REQUIRED_COLS.remove("Dst Code Name")
 
 
     # finally, write the cleaned sheet
@@ -828,9 +972,10 @@ def load_clean_rates(path: str, output_path: str, sheet=None) -> pd.DataFrame:
 
 # ──────────────────────────── quick test ─────────────────────────────────────
 if __name__ == '__main__':
-    PATH = r'C:\Users\User\OneDrive - Hayo Telecom, Inc\Documents\Work\Rate Sheet Automation\rate-sheet-automation\attachments\rates_at_voxmaster.com_20250925_112716\Standard_Full_Price_List_25.09.2025_jerasoft_comparison.xlsx'
+    PATH = r'C:\Users\User\OneDrive - Hayo Telecom, Inc\Documents\Work\Rate Sheet Automation\rate-sheet-automation\attachments\rates_at_cimatelecom.com_20251001_003531\20250930224635_51097_24942_jerasoft_comparison.xlsx'
+    OUT_PATH = r'C:\Users\User\OneDrive - Hayo Telecom, Inc\Documents\Work\Rate Sheet Automation\rate-sheet-automation\attachments\rates_at_cimatelecom.com_20251001_003531\20250930224635_51097_24942_jerasoft_cleaned.xlsx'
     FILE_PATH = PATH
-    OUTPUT_FILE_PATH = PATH
+    OUTPUT_FILE_PATH = OUT_PATH 
     cleaned = load_clean_rates(FILE_PATH, OUTPUT_FILE_PATH, 0)
    
     print('✅ Cleaned and saved.')
