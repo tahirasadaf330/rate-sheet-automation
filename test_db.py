@@ -99,6 +99,6 @@ def push_rate_uploads_from_metadata(metadata_path: str | Path) -> List[int]:
 
 if __name__ == "__main__":
     # Your exact path from the message:
-    meta_path = r"C:\Users\User\OneDrive - Hayo Telecom, Inc\Documents\Work\Rate Sheet Automation\rate-sheet-automation\attachments\rates_at_cimatelecom.com_20251001_003531\metadata.json"
+    meta_path = r"metadata.json"
     ids = push_rate_uploads_from_metadata(meta_path)
     print(f"(ok) inserted rate_uploads ids: {ids}")

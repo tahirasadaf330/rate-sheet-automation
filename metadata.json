@@ -1,0 +1,60 @@
+{
+  "subject": "[CIMA TELECOM] [HAYOTEL] [75433] [USD]",
+  "sender": "rates@cimatelecom.com",
+  "company": "CIMA TELECOM",
+  "prefix": 75433,
+  "date_utc": "2025-10-01",
+  "time_utc": "00:35:31",
+  "directory": "/home/sufyan/code/rate-sheet-automation/attachments/rates_at_cimatelecom.com_20251001_003531",
+  "internetMessageId": "<202510010034.5910Xjs0005825@mx2.anewbroadband.com>",
+  "attachment_count": 1,
+  "attachments": [
+    "20250930224635_51097_24942.xlsx"
+  ],
+  "receivedDateTime_raw": "2025-10-01T00:35:31Z",
+  "processed_at_utc": "2025-10-01T08:21:21Z",
+  "subject_parsing_source": "regex",
+  "best_table_name": "TERM-CIMA TELECOM-PREFIX:75433",
+  "human_eval_details_jerasoft": {
+    "file": "20250930224635_51097_24942_jerasoft_comparison.xlsx",
+    "rows": 156680
+  },
+  "need_human_eval_jerasoft": false,
+  "jerasoft_preprocessed": true,
+  "preprocessed_results": {
+    "20250930224635_51097_24942.xlsx": true,
+    "20250930224635_51097_24942_jerasoft_comparison.xlsx": true
+  },
+  "human_eval_details_pre": {
+    "20250930224635_51097_24942.xlsx": {
+      "rows": 156634
+    },
+    "20250930224635_51097_24942_jerasoft_comparison.xlsx": {
+      "rows": 156680
+    }
+  },
+  "need_human_eval_pre": false,
+  "attachment_stats": {
+    "20250930224635_51097_24942.xlsx": {
+      "total_rows": 156634,
+      "new": 0,
+      "increase": 0,
+      "decrease": 0,
+      "unchanged": 156588,
+      "closed": 0,
+      "backdated_increase": 0,
+      "backdated_decrease": 0,
+      "billing_increment_changes": 46,
+      "source_attachment": "20250930224635_51097_24942.xlsx",
+      "result_file": "20250930224635_51097_24942_comparision_result.xlsx",
+      "generated_at_utc": "2025-10-01T08:41:49Z"
+    }
+  },
+  "comparision_result": {
+    "result": "ok",
+    "20250930224635_51097_24942.xlsx": true
+  },
+  "results_pushed": {
+    "20250930224635_51097_24942_comparision_result.xlsx": true
+  }
+}
