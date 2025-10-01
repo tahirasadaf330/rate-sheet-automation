@@ -478,4 +478,3 @@ def fetch_authorized_sender_emails(active_only: bool = True) -> List[str]:
 
     return emails
 
-# insert_authorized_senders(VERIFIED_SENDERS)
