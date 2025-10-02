@@ -498,8 +498,11 @@ def compare_preprocessed_folders(
                 meta["comparision_result"] = {"result": "ok", **comp_result}
             else:
                 meta["comparision_result"] = {"result": "no comparisons succeeded", **comp_result}
+
+            meta["processed_at_utc"] = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
         else:
             meta["comparision_result"] = {"result": "no eligible vendor files"}
+            meta["processed_at_utc"] = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
 
         try:
             _write_metadata(folder, meta)
