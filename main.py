@@ -29,7 +29,7 @@ from typing import Any
 from database import insert_rejected_email_row  
 # from valid_emails import refresh_verified_senders
 from datetime import datetime
-
+import re
 
  
 FAILED_EMAILS_PATH = Path(__file__).with_name("failed_emails.json")
@@ -847,12 +847,68 @@ def df_to_detail_dicts(df: pd.DataFrame) -> List[Dict[str, Any]]:
 
     return details
 
+# def compute_upload_stats(dfs: List[pd.DataFrame]) -> Dict[str, int]:
+#     """
+#     Aggregate counts for the rate_uploads summary columns across all given DataFrames.
+#     Assumes each df has at least the EXPECTED_COLS. Optional billing increment columns
+#     will be used if present.
+#     """
+#     if not dfs:
+#         return {
+#             "total_rows": 0,
+#             "new": 0, "increase": 0, "decrease": 0, "unchanged": 0, "closed": 0,
+#             "backdated_increase": 0, "backdated_decrease": 0,
+#             "billing_increment_changes": 0,
+#         }
+
+#     df = pd.concat(dfs, ignore_index=True)
+
+#     s = df.get("Status", pd.Series([], dtype="object")).astype(str).str.strip().str.lower()
+#     ct = df.get("Change Type", pd.Series([], dtype="object")).astype(str).str.strip().str.lower()
+
+#     def count_status(name: str) -> int:
+#         return int((s == name).sum())
+
+#     total_rows = int(len(df))
+#     new = count_status("new")
+#     increase = count_status("increase")
+#     decrease = count_status("decrease")
+#     unchanged = count_status("unchanged")
+#     closed = count_status("closed")
+
+#     back_inc = int((((ct.str.contains("backdated", na=False)) & (ct.str.contains("increase", na=False))) |
+#                 (s == "backdated increase")).sum())
+#     back_dec = int((((ct.str.contains("backdated", na=False)) & (ct.str.contains("decrease", na=False))) |
+#                 (s == "backdated decrease")).sum())
+
+#     # billing increment changes if columns exist
+#     bic = 0
+#     if "Old Billing Increment" in df.columns or "New Billing Increment" in df.columns:
+#         obi = df.get("Old Billing Increment")
+#         nbi = df.get("New Billing Increment")
+#         if obi is not None and nbi is not None:
+#             bic = int((obi.astype(str).fillna("") != nbi.astype(str).fillna("")).sum())
+
+#     return {
+#         "total_rows": total_rows,
+#         "new": new,
+#         "increase": increase,
+#         "decrease": decrease,
+#         "unchanged": unchanged,
+#         "closed": closed,
+#         "backdated_increase": back_inc,
+#         "backdated_decrease": back_dec,
+#         "billing_increment_changes": bic,
+#     }
+
+BOUND = r"(?:(?<=^)|(?<=,))\s*{label}\s*(?:(?=,)|(?=$))"  # comma-boundary regex
+
+def _has_ct(df: pd.DataFrame, label: str) -> pd.Series:
+    pat = re.compile(BOUND.format(label=re.escape(label)), flags=re.IGNORECASE)
+    ct = df.get("Change Type", pd.Series([], dtype="object")).astype(str)
+    return ct.str.contains(pat, na=False)
+
 def compute_upload_stats(dfs: List[pd.DataFrame]) -> Dict[str, int]:
-    """
-    Aggregate counts for the rate_uploads summary columns across all given DataFrames.
-    Assumes each df has at least the EXPECTED_COLS. Optional billing increment columns
-    will be used if present.
-    """
     if not dfs:
         return {
             "total_rows": 0,
@@ -863,41 +919,40 @@ def compute_upload_stats(dfs: List[pd.DataFrame]) -> Dict[str, int]:
 
     df = pd.concat(dfs, ignore_index=True)
 
-    s = df.get("Status", pd.Series([], dtype="object")).astype(str).str.strip().str.lower()
-    ct = df.get("Change Type", pd.Series([], dtype="object")).astype(str).str.strip().str.lower()
+    # Membership by Change Type (supports multi-label like "Billing ... Changes,Backdated Increase")
+    is_new      = _has_ct(df, "New")
+    is_closed   = _has_ct(df, "Closed")
+    is_unchanged= _has_ct(df, "Unchanged")
 
-    def count_status(name: str) -> int:
-        return int((s == name).sum())
+    is_back_inc = _has_ct(df, "Backdated Increase")
+    is_back_dec = _has_ct(df, "Backdated Decrease")
 
-    total_rows = int(len(df))
-    new = count_status("new")
-    increase = count_status("increase")
-    decrease = count_status("decrease")
-    unchanged = count_status("unchanged")
-    closed = count_status("closed")
+    # Normal inc/dec exclude backdated so totals don’t double-count
+    is_inc = _has_ct(df, "Increase") & ~is_back_inc
+    is_dec = _has_ct(df, "Decrease") & ~is_back_dec
 
-    back_inc = int((((ct.str.contains("backdated", na=False)) & (ct.str.contains("increase", na=False))) |
-                (s == "backdated increase")).sum())
-    back_dec = int((((ct.str.contains("backdated", na=False)) & (ct.str.contains("decrease", na=False))) |
-                (s == "backdated decrease")).sum())
-
-    # billing increment changes if columns exist
+    # Billing increment changes: prefer ground truth from columns if present;
+    # otherwise fall back to label membership.
     bic = 0
-    if "Old Billing Increment" in df.columns or "New Billing Increment" in df.columns:
-        obi = df.get("Old Billing Increment")
-        nbi = df.get("New Billing Increment")
-        if obi is not None and nbi is not None:
-            bic = int((obi.astype(str).fillna("") != nbi.astype(str).fillna("")).sum())
+    obi = df.get("Old Billing Increment")
+    nbi = df.get("New Billing Increment")
+    if obi is not None and nbi is not None:
+        # Compare with nulls treated as equal and types normalized
+        o = pd.Series(obi, dtype="string").fillna("")
+        n = pd.Series(nbi, dtype="string").fillna("")
+        bic = int((o != n).sum())
+    else:
+        bic = int(_has_ct(df, "Billing Increments Changes").sum())
 
     return {
-        "total_rows": total_rows,
-        "new": new,
-        "increase": increase,
-        "decrease": decrease,
-        "unchanged": unchanged,
-        "closed": closed,
-        "backdated_increase": back_inc,
-        "backdated_decrease": back_dec,
+        "total_rows": int(len(df)),
+        "new":               int(is_new.sum()),
+        "increase":          int(is_inc.sum()),
+        "decrease":          int(is_dec.sum()),
+        "unchanged":         int(is_unchanged.sum()),
+        "closed":            int(is_closed.sum()),
+        "backdated_increase":int(is_back_inc.sum()),
+        "backdated_decrease":int(is_back_dec.sum()),
         "billing_increment_changes": bic,
     }
 
@@ -1026,8 +1081,8 @@ def push_all_ok_results(attachments_root: str | Path) -> Tuple[int, int, int]:
 
 
 
-# push_rejections_from_metadata("attachments")
+push_rejections_from_metadata("attachments")
 
-# push_all_ok_results(ATTACHMENTS_ROOT)
+push_all_ok_results(ATTACHMENTS_ROOT)
 
-# push_failed_emails_json_to_db("failed_emails.json")  
+push_failed_emails_json_to_db("failed_emails.json")  
