@@ -43,7 +43,7 @@ after = datetime.now().strftime("%Y-%m-%d")
 before = None       # only include emails on/before this date (YYYY-MM-DD) or None
 unread_only = False    
 ATTEMPTS = 2
-# verify_fetch_emails(after, before, unread_only)
+verify_fetch_emails(after, before, unread_only)
 
 #_______________ Jerasoft Script _____________
 
@@ -164,7 +164,7 @@ def process_all_directories(attachments_base="attachments"):
         if info is None:
             print(f"[SKIP] {company} not exported; moving on.")
 
-# process_all_directories()
+process_all_directories()
 
 #_______________ Preprocess Script _____________
 
@@ -284,7 +284,7 @@ def clean_preprocessed_folders(attachments_dir: str | Path):
     print(f"Files cleaned:     {files_done}")
     return folders_done, files_done
 
-# clean_preprocessed_folders("attachments")
+clean_preprocessed_folders("attachments")
 
 #________________ Ratesheet Comparision Script _____________
 
@@ -514,7 +514,7 @@ def compare_preprocessed_folders(
     print(f"Comparison files made: {writes}")
     return folders_done, writes
 
-compare_preprocessed_folders("attachments_new", notice_days=7, rate_tol=0.0001)  #check the difference upto 4 decimal places.
+compare_preprocessed_folders("attachments", notice_days=7, rate_tol=0.0001)  #check the difference upto 4 decimal places.
 
 ##############################################
 
