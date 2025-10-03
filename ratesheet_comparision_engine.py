@@ -210,12 +210,37 @@ def compare(left: pd.DataFrame, right: pd.DataFrame, as_of_date: Optional[str], 
 #################################
 # Changed to tackle the status rejected issue
 ################################
+        # if bi_changed[i]:
+        #     print(" → Billing Increment changed")
+        #     change_type = "Billing Increments Changes"
+        #     eff_note = effective_note(n_date, as_of, notice_days)
+
+        #     # Accept only with proper notice; reject backdated or short notice
+        #     if n_date < as_of:
+        #         status = "Rejected"
+        #         notes.append("immediate effective date")
+        #     elif eff_note == "proper 7-day notice":
+        #         status = "Accepted"
+        #         notes.append("proper 7-day notice")
+        #     else:
+        #         status = "Rejected"
+        #         notes.append(eff_note)
+
+        #     notes.append("billing increment changed")
+
+        #     # If rate ALSO changed (beyond tolerance), mention it in notes
+        #     if can_compare_rate[i] and not np.isclose(n_rate, o_rate, atol=rate_tol):
+        #         notes.append("rate changed")
+
         if bi_changed[i]:
             print(" → Billing Increment changed")
-            change_type = "Billing Increments Changes"
+
+            # Build a combined label. We'll append a rate label with backdated/normal flavor.
+            labels = ["Billing Increments Changes"]
+
             eff_note = effective_note(n_date, as_of, notice_days)
 
-            # Accept only with proper notice; reject backdated or short notice
+            # BI decides status in this branch, same as your original logic
             if n_date < as_of:
                 status = "Rejected"
                 notes.append("immediate effective date")
@@ -228,9 +253,20 @@ def compare(left: pd.DataFrame, right: pd.DataFrame, as_of_date: Optional[str], 
 
             notes.append("billing increment changed")
 
-            # If rate ALSO changed (beyond tolerance), mention it in notes
-            if can_compare_rate[i] and not np.isclose(n_rate, o_rate, atol=rate_tol):
-                notes.append("rate changed")
+            # If the rate ALSO changed beyond tolerance, append a precise label:
+            # Increase/Decrease vs Backdated Increase/Backdated Decrease
+            if can_compare_rate[i] and pd.notna(o_rate) and pd.notna(n_rate) and not np.isclose(n_rate, o_rate, atol=rate_tol):
+                delta = float(n_rate) - float(o_rate)
+                if delta > rate_tol:
+                    labels.append("Backdated Increase" if n_date < as_of else "Increase")
+                    notes.append("rate increased")
+                elif delta < -rate_tol:
+                    labels.append("Backdated Decrease" if n_date < as_of else "Decrease")
+                    notes.append("rate decreased")
+
+            # Final combined label, e.g. "Billing Increments Changes,Backdated Increase"
+            change_type = ",".join(labels)
+
 ############################
 ###########################
         else:
