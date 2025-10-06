@@ -752,6 +752,7 @@ def normalise_date_any(val) -> pd.Timestamp:
 
     return pd.NaT
 
+
 def clean_billing_increment(val) -> str:
     """
     Normalize vendor increments with the rule:
