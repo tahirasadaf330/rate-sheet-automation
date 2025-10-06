@@ -14,6 +14,7 @@ jerasoft cleaning is failing see why?
 
 issues
 
+resolve the date issues.
 
 ==============================
 
@@ -25,6 +26,5 @@ track the emails that have been processed so the system wont process them again
 like by keeping a meta file etc...
 
 see the serach time complexity in both cases.
-
 
 harden the case of recleaning once failed files everytime like add max 2 tries.
