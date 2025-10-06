@@ -722,39 +722,8 @@ def _normalize_excel_writer_path(path: str) -> tuple[str, dict]:
     dbg(f"[writer] forcing .xlsx for unknown ext {ext or '(none)'}")
     return new_path, {'engine': 'openpyxl'}
 
-
-# def normalise_date_any(val) -> pd.Timestamp:
-#     """Return pandas.Timestamp (UTC-naive) or NaT if invalid."""
-#     if val is None or (isinstance(val, float) and np.isnan(val)) or str(val).strip() == '':
-#         return pd.NaT
-
-#     s = str(val).strip()
-
-#     # Excel serial (integer days since 1899-12-30)
-#     if re.fullmatch(r'\d{1,6}', s):
-#         try:
-#             serial = int(s)
-#             if serial > 0:
-#                 return EXCEL_EPOCH + pd.Timedelta(days=serial)
-#         except Exception:
-#             return pd.NaT
-
-#     # Remove timezone suffixes like +0000 or Z
-#     s = re.sub(r'\s*\+\d{4}$', '', s).rstrip('Zz')
-#     s = s.replace('/', '-').replace('.', '-')
-
-#     for dayfirst in (True, False):
-#         try:
-#             dt = dparse.parse(s, dayfirst=dayfirst, fuzzy=True,
-#                               default=datetime(1900, 1, 1))
-#             return pd.Timestamp(dt.date())
-#         except Exception:
-#             continue
-
-#     return pd.NaT
-
 def normalise_date_any(val) -> pd.Timestamp:
-    """Return pandas.Timestamp (UTC-naive) or NaT if invalid, always in MM-DD-YYYY format."""
+    """Return pandas.Timestamp (UTC-naive) or NaT if invalid."""
     if val is None or (isinstance(val, float) and np.isnan(val)) or str(val).strip() == '':
         return pd.NaT
 
@@ -765,7 +734,7 @@ def normalise_date_any(val) -> pd.Timestamp:
         try:
             serial = int(s)
             if serial > 0:
-                return (EXCEL_EPOCH + pd.Timedelta(days=serial)).strftime('%m-%d-%Y')  # Return as MM-DD-YYYY
+                return EXCEL_EPOCH + pd.Timedelta(days=serial)
         except Exception:
             return pd.NaT
 
@@ -775,14 +744,13 @@ def normalise_date_any(val) -> pd.Timestamp:
 
     for dayfirst in (True, False):
         try:
-            dt = dparse.parse(s, dayfirst=dayfirst, fuzzy=True, default=datetime(1900, 1, 1))
-            return pd.Timestamp(dt.date()).strftime('%m-%d-%Y')  # Return as MM-DD-YYYY
+            dt = dparse.parse(s, dayfirst=dayfirst, fuzzy=True,
+                              default=datetime(1900, 1, 1))
+            return pd.Timestamp(dt.date())
         except Exception:
             continue
 
     return pd.NaT
-
-
 
 def clean_billing_increment(val) -> str:
     """
