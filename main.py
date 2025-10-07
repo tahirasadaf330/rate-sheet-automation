@@ -30,7 +30,7 @@ from database import insert_rejected_email_row
 from datetime import datetime
 import re
 from preprocess_data import _raw_from_excel_pandas
-from database import insert_ingest_file             
+from database import insert_or_update_ingest_file             
 
  
 FAILED_EMAILS_PATH = Path(__file__).with_name("failed_emails.json")
@@ -180,7 +180,7 @@ def ingest_files_for_manual_date(attachments_root: str | Path = "attachments") -
         file_path = str(fpath)
 
         try:
-            _id = insert_ingest_file(
+            _id = insert_or_update_ingest_file(
                 email_address=email_address,
                 subject=subject,
                 received_at=received_at,
