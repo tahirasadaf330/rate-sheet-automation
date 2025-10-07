@@ -27,14 +27,14 @@ from database import insert_rate_upload, bulk_insert_rate_upload_details, push_f
 import pandas as pd
 from typing import Any
 from database import insert_rejected_email_row  
-# from valid_emails import refresh_verified_senders
 from datetime import datetime
 import re
+from preprocess_data import _raw_from_excel_pandas
+from database import insert_ingest_file             
 
  
 FAILED_EMAILS_PATH = Path(__file__).with_name("failed_emails.json")
 
-# refresh_verified_senders()
 
 #_____________ Email Verification Script_____________
 
@@ -43,7 +43,165 @@ after = datetime.now().strftime("%Y-%m-%d")
 before = None       # only include emails on/before this date (YYYY-MM-DD) or None
 unread_only = False    
 ATTEMPTS = 2
-verify_fetch_emails(after, before, unread_only)
+
+#________________ Manual Date Verification _____________________
+
+MAX_PREVIEW_ROWS = 200
+EXCEL_EXTS = ('.xlsx', '.xlsm', '.xls')
+
+def _parse_iso_utc_dt(s: Optional[str]) -> Optional[datetime]:
+    if not s or not isinstance(s, str):
+        return None
+    try:
+        return datetime.fromisoformat(s.replace("Z", "+00:00"))
+    except Exception:
+        return None
+
+def _df_preview_records(df: pd.DataFrame, limit: int = MAX_PREVIEW_ROWS) -> list[dict]:
+    """Rename columns to col1..colN and return first N rows as list of dicts (strings, blanks for NaN)."""
+    if df is None or df.empty:
+        return []
+    df = df.head(limit).reset_index(drop=True)
+    # ensure all values are strings; keep blanks for NaN
+    try:
+        df = df.astype("string")
+    except Exception:
+        df = df.astype(str)
+    ncols = int(df.shape[1])
+    df.columns = [f"col{i+1}" for i in range(ncols)]
+    # fillna("") for string dtype keeps <NA> out of JSON
+    try:
+        df = df.fillna("")
+    except Exception:
+        pass
+    return df.to_dict(orient="records")
+
+def _first_attachment_path(meta: dict) -> Optional[Path]:
+    """Return absolute Path to the first attachment (join with directory if needed)."""
+    attachments = meta.get("attachments") or []
+    if not isinstance(attachments, list) or len(attachments) == 0:
+        return None
+
+    first_item = str(attachments[0]).strip()
+    if not first_item:
+        return None
+
+    p = Path(first_item)
+    if p.is_absolute():
+        return p
+
+    # directory contains the folder path (Linux server)
+    base_dir = str(meta.get("directory") or "").strip()
+    if not base_dir:
+        return None
+    return Path(base_dir) / first_item
+
+def ingest_files_for_manual_date(attachments_root: str | Path = "attachments") -> tuple[int, int, int]:
+    """
+    Walk attachments/* folders, and for each folder whose metadata.json has
+    no 'date_verification_ingestion' (or it's False):
+      - pick the first attachment
+      - read first 200 rows (csv or excel via _raw_from_excel_pandas)
+      - build preview_cache (list[dict] -> col1..colN)
+      - insert into ingest_files (email_address, subject, received_at, processed_at, file_path, preview_cache, error_message)
+      - set metadata['date_verification_ingestion'] = True
+
+    Returns: (scanned_folders, inserted_rows, skipped_folders)
+    """
+    root = Path(attachments_root).expanduser().resolve()
+    if not root.exists():
+        print(f"[INGEST] attachments root not found: {root}")
+        return (0, 0, 0)
+
+    scanned = 0
+    inserted = 0
+    skipped = 0
+
+    for folder in sorted(root.iterdir()):
+        if not folder.is_dir():
+            continue
+        scanned += 1
+
+        meta_path = folder / "metadata.json"
+        if not meta_path.exists():
+            print(f"[INGEST][SKIP] {folder.name}: no metadata.json")
+            skipped += 1
+            continue
+
+        try:
+            with meta_path.open("r", encoding="utf-8") as f:
+                meta = json.load(f) or {}
+        except Exception as e:
+            print(f"[INGEST][SKIP] {folder.name}: failed reading metadata.json: {e}")
+            skipped += 1
+            continue
+
+        # Skip if already ingested for manual date verification
+        if bool(meta.get("date_verification_ingestion")):
+            # already processed this folder for manual date step
+            continue
+
+        # Step 2: find first attachment
+        fpath = _first_attachment_path(meta)
+        if not fpath:
+            print(f"[INGEST][SKIP] {folder.name}: metadata.attachments missing/empty")
+            skipped += 1
+            continue
+
+        # Build the preview_cache
+        preview_cache: list[dict] = []
+        error_message: Optional[str] = None
+
+        try:
+            ext = fpath.suffix.lower()
+            if ext == ".csv":
+                # treat as raw grid; include header row as data by using header=None
+                df = pd.read_csv(str(fpath), header=None, nrows=MAX_PREVIEW_ROWS, dtype=str, on_bad_lines="skip")
+                preview_cache = _df_preview_records(df, MAX_PREVIEW_ROWS)
+            elif ext in EXCEL_EXTS:
+                df = _raw_from_excel_pandas(str(fpath), sheet=0)  # your robust multi-engine reader
+                preview_cache = _df_preview_records(df, MAX_PREVIEW_ROWS)
+            else:
+                # optional: best-effort text read as CSV
+                try:
+                    df = pd.read_csv(str(fpath), header=None, nrows=MAX_PREVIEW_ROWS, dtype=str, engine="python")
+                    preview_cache = _df_preview_records(df, MAX_PREVIEW_ROWS)
+                except Exception as e2:
+                    raise RuntimeError(f"Unsupported file type {ext} and CSV fallback failed: {e2}") from e2
+        except Exception as e:
+            error_message = f"preview build failed: {e}"
+            preview_cache = []  # still ingest a row with the error
+
+        # Collect DB fields
+        email_address = (meta.get("sender") or "").strip() or None
+        subject = (meta.get("subject") or "").strip() or None
+        received_at = _parse_iso_utc_dt(meta.get("receivedDateTime_raw"))
+        processed_at = _parse_iso_utc_dt(meta.get("processed_at_utc"))
+        file_path = str(fpath)
+
+        try:
+            _id = insert_ingest_file(
+                email_address=email_address,
+                subject=subject,
+                received_at=received_at,
+                processed_at=processed_at,
+                file_path=file_path,
+                preview_cache=preview_cache,
+                error_message=error_message,
+            )
+            inserted += 1
+            print(f"[INGEST][OK] id={_id} -> {folder.name} :: {fpath.name}")
+
+            # Mark folder as done for this step
+            meta["date_verification_ingestion"] = True
+            with meta_path.open("w", encoding="utf-8") as f:
+                json.dump(meta, f, ensure_ascii=False, indent=2)
+        except Exception as db_e:
+            print(f"[INGEST][ERR] DB insert failed for {folder.name}: {db_e}")
+            # do NOT set the flag so we can retry later
+
+    print(f"[INGEST] summary: scanned={scanned}, inserted={inserted}, skipped={skipped}")
+    return (scanned, inserted, skipped)
 
 #_______________ Jerasoft Script _____________
 
@@ -164,8 +322,6 @@ def process_all_directories(attachments_base="attachments"):
         if info is None:
             print(f"[SKIP] {company} not exported; moving on.")
 
-process_all_directories()
-
 #_______________ Preprocess Script _____________
 
 ALLOWED_EXTS = {".xlsx", ".xls", ".csv"}
@@ -283,8 +439,6 @@ def clean_preprocessed_folders(attachments_dir: str | Path):
     print(f"Folders processed: {folders_done}")
     print(f"Files cleaned:     {files_done}")
     return folders_done, files_done
-
-clean_preprocessed_folders("attachments")
 
 #________________ Ratesheet Comparision Script _____________
 
@@ -513,8 +667,6 @@ def compare_preprocessed_folders(
     print(f"Folders processed:     {folders_done}")
     print(f"Comparison files made: {writes}")
     return folders_done, writes
-
-compare_preprocessed_folders("attachments", notice_days=7, rate_tol=0.0001)  #check the difference upto 4 decimal places.
 
 ##############################################
 
@@ -847,60 +999,6 @@ def df_to_detail_dicts(df: pd.DataFrame) -> List[Dict[str, Any]]:
 
     return details
 
-# def compute_upload_stats(dfs: List[pd.DataFrame]) -> Dict[str, int]:
-#     """
-#     Aggregate counts for the rate_uploads summary columns across all given DataFrames.
-#     Assumes each df has at least the EXPECTED_COLS. Optional billing increment columns
-#     will be used if present.
-#     """
-#     if not dfs:
-#         return {
-#             "total_rows": 0,
-#             "new": 0, "increase": 0, "decrease": 0, "unchanged": 0, "closed": 0,
-#             "backdated_increase": 0, "backdated_decrease": 0,
-#             "billing_increment_changes": 0,
-#         }
-
-#     df = pd.concat(dfs, ignore_index=True)
-
-#     s = df.get("Status", pd.Series([], dtype="object")).astype(str).str.strip().str.lower()
-#     ct = df.get("Change Type", pd.Series([], dtype="object")).astype(str).str.strip().str.lower()
-
-#     def count_status(name: str) -> int:
-#         return int((s == name).sum())
-
-#     total_rows = int(len(df))
-#     new = count_status("new")
-#     increase = count_status("increase")
-#     decrease = count_status("decrease")
-#     unchanged = count_status("unchanged")
-#     closed = count_status("closed")
-
-#     back_inc = int((((ct.str.contains("backdated", na=False)) & (ct.str.contains("increase", na=False))) |
-#                 (s == "backdated increase")).sum())
-#     back_dec = int((((ct.str.contains("backdated", na=False)) & (ct.str.contains("decrease", na=False))) |
-#                 (s == "backdated decrease")).sum())
-
-#     # billing increment changes if columns exist
-#     bic = 0
-#     if "Old Billing Increment" in df.columns or "New Billing Increment" in df.columns:
-#         obi = df.get("Old Billing Increment")
-#         nbi = df.get("New Billing Increment")
-#         if obi is not None and nbi is not None:
-#             bic = int((obi.astype(str).fillna("") != nbi.astype(str).fillna("")).sum())
-
-#     return {
-#         "total_rows": total_rows,
-#         "new": new,
-#         "increase": increase,
-#         "decrease": decrease,
-#         "unchanged": unchanged,
-#         "closed": closed,
-#         "backdated_increase": back_inc,
-#         "backdated_decrease": back_dec,
-#         "billing_increment_changes": bic,
-#     }
-
 BOUND = r"(?:(?<=^)|(?<=,))\s*{label}\s*(?:(?=,)|(?=$))"  # comma-boundary regex
 
 def _has_ct(df: pd.DataFrame, label: str) -> pd.Series:
@@ -1080,9 +1178,29 @@ def push_all_ok_results(attachments_root: str | Path) -> Tuple[int, int, int]:
     return folders_done, files_done, rows_total
 
 
+if __name__ == "__main__":
+    # scrap all the valid emails
+    verify_fetch_emails(after, before, unread_only)
 
-push_rejections_from_metadata("attachments")
+    # run the ingestion pass before any further processing
+    ingest_files_for_manual_date("attachments")
 
-push_all_ok_results(ATTACHMENTS_ROOT)
+    # # fetch jerasoft rates
+    # process_all_directories()
 
-push_failed_emails_json_to_db("failed_emails.json")  
+    # # preprocessing the files
+    # clean_preprocessed_folders("attachments")
+
+    # # running comparision engine on all the files
+    # compare_preprocessed_folders("attachments", notice_days=7, rate_tol=0.0001)  #check the difference upto 4 decimal places.
+
+    # # pushing all the relevant details to the data base
+    # push_rejections_from_metadata("attachments")
+
+    # push_all_ok_results(ATTACHMENTS_ROOT)
+
+    # push_failed_emails_json_to_db("failed_emails.json")  
+
+
+
+

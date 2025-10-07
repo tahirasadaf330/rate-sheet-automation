@@ -229,7 +229,6 @@ def _raw_from_excel_pandas(path: str, sheet) -> pd.DataFrame:
     Read a sheet using pandas.read_excel with multiple engines.
     Returns a raw grid (no headers assigned), dropping all-empty rows/columns.
     """
-    import pandas as pd
     engines = ("calamine", "openpyxl")  # try calamine first; fall back to openpyxl
     last_exc = None
     for eng in engines:
