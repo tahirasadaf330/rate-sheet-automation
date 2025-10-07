@@ -23,15 +23,12 @@ from pathlib import Path
 from preprocess_data import load_clean_rates
 from typing import Iterable, Tuple, Optional, Dict, Any, List
 from datetime import datetime, timezone
-from database import insert_rate_upload, bulk_insert_rate_upload_details, push_failed_emails_json_to_db
+from database import insert_rate_upload, bulk_insert_rate_upload_details, push_failed_emails_json_to_db, fetch_approved_unprocessed_paths, insert_rejected_email_row, insert_or_update_ingest_file
 import pandas as pd
 from typing import Any
-from database import insert_rejected_email_row  
 from datetime import datetime
 import re
 from preprocess_data import _raw_from_excel_pandas
-from database import insert_or_update_ingest_file             
-
  
 FAILED_EMAILS_PATH = Path(__file__).with_name("failed_emails.json")
 
@@ -203,6 +200,66 @@ def ingest_files_for_manual_date(attachments_root: str | Path = "attachments") -
     print(f"[INGEST] summary: scanned={scanned}, inserted={inserted}, skipped={skipped}")
     return (scanned, inserted, skipped)
 
+def mark_date_verification_ingestion(valid_paths: Iterable[str]) -> Tuple[int, int, int]:
+    """
+    For each file path like:
+      /.../attachments/<dir>/<filename.xlsx>
+    find its parent directory <dir>, open <dir>/metadata.json, and set:
+      date_verification_ingestion_status = True
+
+    - Does NOT modify the input list.
+    - Deduplicates parent directories.
+    - Returns (dirs_seen, updated, missing_meta).
+    """
+    # Collect unique parent directories
+    parents = []
+    seen = set()
+    for p in valid_paths:
+        try:
+            d = Path(p).parent.resolve()
+        except Exception:
+            continue
+        if d not in seen:
+            seen.add(d)
+            parents.append(d)
+
+    dirs_seen = len(parents)
+    updated = 0
+    missing_meta = 0
+
+    for d in parents:
+        meta_path = d / "metadata.json"
+        if not meta_path.exists():
+            print(f"[INGEST][SKIP] No metadata.json in {d}")
+            missing_meta += 1
+            continue
+
+        try:
+            with meta_path.open("r", encoding="utf-8") as f:
+                meta = json.load(f)
+        except Exception as e:
+            print(f"[INGEST][WARN] Failed to read {meta_path}: {e}")
+            missing_meta += 1
+            continue
+
+        if meta.get("date_verification_ingestion_status") is True:
+            print(f"[INGEST] Already marked true: {d}")
+            continue
+
+        meta["date_verification_ingestion_status"] = True
+
+        # Atomic-ish write
+        tmp = meta_path.with_suffix(meta_path.suffix + ".tmp")
+        with tmp.open("w", encoding="utf-8") as f:
+            json.dump(meta, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, meta_path)
+
+        updated += 1
+        print(f"[INGEST] Marked date_verification_ingestion_status=true → {meta_path}")
+
+    print(f"[INGEST] summary: dirs_seen={dirs_seen}, updated={updated}, missing_meta={missing_meta}")
+    return dirs_seen, updated, missing_meta
+
 #_______________ Jerasoft Script _____________
 
 def process_all_directories(attachments_base="attachments"):
@@ -231,6 +288,11 @@ def process_all_directories(attachments_base="attachments"):
         # Skip if already jerasoft_preprocessed
         if meta.get("jerasoft_preprocessed") is True:
             print(f"[SKIP] Already jerasoft_preprocessed: {subdir}")
+            continue
+
+        # NEW: require manual date verification approval
+        if not bool(meta.get("date_verification_ingestion_status")):
+            print(f"[SKIP] Awaiting date verification approval: {subdir}")
             continue
 
         # Extract subject
@@ -1182,24 +1244,33 @@ if __name__ == "__main__":
     # scrap all the valid emails
     verify_fetch_emails(after, before, unread_only)
 
+
+    #________________________________________________
     # run the ingestion pass before any further processing
     ingest_files_for_manual_date("attachments")
 
-    # # fetch jerasoft rates
-    # process_all_directories()
+    valid_paths = fetch_approved_unprocessed_paths()
 
-    # # preprocessing the files
-    # clean_preprocessed_folders("attachments")
+    mark_date_verification_ingestion(valid_paths)
+    #________________________________________________
 
-    # # running comparision engine on all the files
-    # compare_preprocessed_folders("attachments", notice_days=7, rate_tol=0.0001)  #check the difference upto 4 decimal places.
 
-    # # pushing all the relevant details to the data base
-    # push_rejections_from_metadata("attachments")
 
-    # push_all_ok_results(ATTACHMENTS_ROOT)
+    # fetch jerasoft rates
+    process_all_directories()
 
-    # push_failed_emails_json_to_db("failed_emails.json")  
+    # preprocessing the files
+    clean_preprocessed_folders("attachments")
+
+    # running comparision engine on all the files
+    compare_preprocessed_folders("attachments", notice_days=7, rate_tol=0.0001)  #check the difference upto 4 decimal places.
+
+    # pushing all the relevant details to the data base
+    push_rejections_from_metadata("attachments")
+
+    push_all_ok_results(ATTACHMENTS_ROOT)
+
+    push_failed_emails_json_to_db("failed_emails.json")  
 
 
 

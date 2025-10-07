@@ -618,3 +618,30 @@ def bulk_upsert_ingest_files(
         conn.commit()
         # Rowcount is fine as a lower-bound; ON CONFLICT may not reflect all changes precisely.
         return affected
+
+def fetch_approved_unprocessed_paths(limit: Optional[int] = None) -> List[str]:
+    """
+    Return a list of file_path values from ingest_files where:
+      - status ILIKE 'approved' (case-insensitive)
+      - is_processed = FALSE (treats NULL as FALSE too)
+    Ordered by received_at (oldest first), then id.
+    """
+    base_sql = """
+        SELECT file_path
+        FROM ingest_files
+        WHERE LOWER(COALESCE(status, '')) = 'approved'
+          AND COALESCE(is_processed, FALSE) = FALSE
+          AND file_path IS NOT NULL
+          AND file_path <> ''
+        ORDER BY received_at NULLS LAST, id ASC
+    """
+    sql = base_sql + (" LIMIT %s" if limit is not None else "")
+
+    with get_conn() as conn, conn.cursor() as cur:
+        if limit is not None:
+            cur.execute(sql, (limit,))
+        else:
+            cur.execute(sql)
+        rows = cur.fetchall()
+
+    return [r[0] for r in rows]
