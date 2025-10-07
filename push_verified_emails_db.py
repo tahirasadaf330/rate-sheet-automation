@@ -102,7 +102,6 @@ VERIFIED_SENDERS = [
     "rates@infotelecom.al",
     "rates@ingenuitytelecom.com",
     "rates@innovativetelecomcorp.com",
-    "rates@ipbtel.com",
     "rates@ipvoip.net",
     "correspondence@iraqguru.com",
     "rates@jigsawtel.com",

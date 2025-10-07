@@ -10,17 +10,20 @@ from psycopg2.extras import execute_values, Json
 from pathlib import Path
 
 
+
 # Load environment variables
 load_dotenv()
 
+
 def get_conn():
-    """Create a new PostgreSQL connection using env vars."""
-    return psycopg2.connect(
+  print('calling the get conn function ......')
+  return psycopg2.connect(
         host=os.getenv("DB_HOST"),
         port=os.getenv("DB_PORT"),
         dbname=os.getenv("DB_DATABASE"),
         user=os.getenv("DB_USERNAME"),
         password=os.getenv("DB_PASSWORD"),
+
     )
 
 def insert_authorized_senders(emails):
@@ -44,7 +47,7 @@ def insert_authorized_senders(emails):
         execute_values(cur, query, [(email, True) for email in emails], template=values_template)
         conn.commit()
         print(f"Inserted {cur.rowcount} new emails into authorized_senders.")
-
+    
 
 # -----------------------------
 # Rejected emails (row-per-item) support
@@ -477,4 +480,3 @@ def fetch_authorized_sender_emails(active_only: bool = True) -> List[str]:
             emails.append(e)
 
     return emails
-

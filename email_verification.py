@@ -874,3 +874,6 @@ if __name__ == "__main__":
     before = "2025-08-19"             # only include emails on/before this date (YYYY-MM-DD) or None
     unread_only = False    
     verify_fetch_emails(after, before, unread_only)
+# print(f"DB_HOST: {os.getenv('DB_HOST')}")
+# print(f"DB_USER: {os.getenv('DB_USER')}")
+# print(f"DB_PASSWORD: {os.getenv('DB_PASSWORD')}")
