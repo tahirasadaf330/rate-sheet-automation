@@ -841,7 +841,7 @@ def clean_billing_increment(val) -> str:
     # len(nums) == 1
     return f"{nums[0]}/{nums[0]}"
 
-def load_clean_rates(path: str, output_path: str, sheet=None, date_format: str | None = None) -> pd.DataFrame:
+def load_clean_rates(path: str, output_path: str, sheet=None, date_format_email: str | None = None) -> pd.DataFrame:
     """
     Robust loader:
       1) Read raw grid (openpyxl for Excel; pandas for CSV/TXT)
@@ -902,7 +902,7 @@ def load_clean_rates(path: str, output_path: str, sheet=None, date_format: str |
     # Effective Date: robust parse (your helper returns Timestamp or NaT)
     # df['Effective Date'] = df['Effective Date'].apply(normalise_date_any)
 
-    df['Effective Date'] = df['Effective Date'].apply(lambda v: normalise_date_any(v, date_format=date_format))
+    df['Effective Date'] = df['Effective Date'].apply(lambda v: normalise_date_any(v, date_format=date_format_email))
 
 
     df = expand_dst_code_rows(df)
