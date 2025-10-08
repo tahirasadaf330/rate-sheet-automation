@@ -721,14 +721,45 @@ def _normalize_excel_writer_path(path: str) -> tuple[str, dict]:
     dbg(f"[writer] forcing .xlsx for unknown ext {ext or '(none)'}")
     return new_path, {'engine': 'openpyxl'}
 
-def normalise_date_any(val) -> pd.Timestamp:
-    """Return pandas.Timestamp (UTC-naive) or NaT if invalid."""
+# def normalise_date_any(val) -> pd.Timestamp:
+#     """Return pandas.Timestamp (UTC-naive) or NaT if invalid."""
+#     if val is None or (isinstance(val, float) and np.isnan(val)) or str(val).strip() == '':
+#         return pd.NaT
+
+#     s = str(val).strip()
+
+#     # Excel serial (integer days since 1899-12-30)
+#     if re.fullmatch(r'\d{1,6}', s):
+#         try:
+#             serial = int(s)
+#             if serial > 0:
+#                 return EXCEL_EPOCH + pd.Timedelta(days=serial)
+#         except Exception:
+#             return pd.NaT
+
+#     # Remove timezone suffixes like +0000 or Z
+#     s = re.sub(r'\s*\+\d{4}$', '', s).rstrip('Zz')
+#     s = s.replace('/', '-').replace('.', '-')
+
+#     for dayfirst in (True, False):
+#         try:
+#             dt = dparse.parse(s, dayfirst=dayfirst, fuzzy=True,
+#                               default=datetime(1900, 1, 1))
+#             return pd.Timestamp(dt.date())
+#         except Exception:
+#             continue
+
+#     return pd.NaT
+
+def normalise_date_any(val, date_format: str | None = None) -> pd.Timestamp:
+    """Return pandas.Timestamp (UTC-naive) or NaT if invalid.
+       If date_format is provided, parse strictly to that format; else auto-guess."""
     if val is None or (isinstance(val, float) and np.isnan(val)) or str(val).strip() == '':
         return pd.NaT
 
     s = str(val).strip()
 
-    # Excel serial (integer days since 1899-12-30)
+    # Excel serial (integer days since 1899-12-30) – allowed in both modes
     if re.fullmatch(r'\d{1,6}', s):
         try:
             serial = int(s)
@@ -737,20 +768,40 @@ def normalise_date_any(val) -> pd.Timestamp:
         except Exception:
             return pd.NaT
 
-    # Remove timezone suffixes like +0000 or Z
-    s = re.sub(r'\s*\+\d{4}$', '', s).rstrip('Zz')
-    s = s.replace('/', '-').replace('.', '-')
+    # Strip timezone suffixes and unify separators
+    s = re.sub(r'\s*\+\d{4}$', '', s).rstrip('Zz').strip()
 
+    if date_format:
+        # STRICT mode: parse exactly as given format
+        s_norm = s.replace('/', '-').replace('.', '-')
+        fmt_raw = date_format.strip().lower().replace('/', '-').replace('.', '-')
+
+        # accept either python strptime tokens or simple tokens like yyyy-mm-dd, mm-dd-yy, etc.
+        if '%' in fmt_raw:
+            fmt_py = fmt_raw
+        else:
+            # replace longer tokens first to avoid overlaps
+            fmt_py = (fmt_raw
+                      .replace('yyyy', '%Y')
+                      .replace('yy',   '%y')
+                      .replace('mm',   '%m')
+                      .replace('dd',   '%d'))
+        try:
+            dt = datetime.strptime(s_norm, fmt_py)
+            return pd.Timestamp(dt.date())
+        except Exception:
+            return pd.NaT
+
+    # AUTO mode (original behavior)
+    s_auto = s.replace('/', '-').replace('.', '-')
     for dayfirst in (True, False):
         try:
-            dt = dparse.parse(s, dayfirst=dayfirst, fuzzy=True,
-                              default=datetime(1900, 1, 1))
+            dt = dparse.parse(s_auto, dayfirst=dayfirst, fuzzy=True, default=datetime(1900, 1, 1))
             return pd.Timestamp(dt.date())
         except Exception:
             continue
 
     return pd.NaT
-
 
 def clean_billing_increment(val) -> str:
     """
@@ -790,7 +841,7 @@ def clean_billing_increment(val) -> str:
     # len(nums) == 1
     return f"{nums[0]}/{nums[0]}"
 
-def load_clean_rates(path: str, output_path: str, sheet=None) -> pd.DataFrame:
+def load_clean_rates(path: str, output_path: str, sheet=None, date_format: str | None = None) -> pd.DataFrame:
     """
     Robust loader:
       1) Read raw grid (openpyxl for Excel; pandas for CSV/TXT)
@@ -824,17 +875,6 @@ def load_clean_rates(path: str, output_path: str, sheet=None) -> pd.DataFrame:
     df = _synthesize_billing_increment(df)
     df = trim_after_notes_and_strip_blank_above(df)
 
-    # keep only canonical required columns
-
-    # if "jerasoft" in str(path).lower():
-    #     # make sure "Dst Code" is included exactly once
-    #     if "Dst Code Name" not in REQUIRED_COLS:
-    #         REQUIRED_COLS.append("Dst Code Name")
-    #     df = df[REQUIRED_COLS].copy()
-
-    # else:
-    #     df = df[REQUIRED_COLS].copy()
-
     is_js = "jerasoft" in str(path).lower()
     required_cols = list(REQUIRED_COLS)
     if is_js and "Dst Code Name" not in required_cols:
@@ -860,7 +900,10 @@ def load_clean_rates(path: str, output_path: str, sheet=None) -> pd.DataFrame:
     df['Billing Increment'] = df['Billing Increment'].astype(str).str.strip().apply(clean_billing_increment)
 
     # Effective Date: robust parse (your helper returns Timestamp or NaT)
-    df['Effective Date'] = df['Effective Date'].apply(normalise_date_any)
+    # df['Effective Date'] = df['Effective Date'].apply(normalise_date_any)
+
+    df['Effective Date'] = df['Effective Date'].apply(lambda v: normalise_date_any(v, date_format=date_format))
+
 
     df = expand_dst_code_rows(df)
 

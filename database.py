@@ -619,15 +619,17 @@ def bulk_upsert_ingest_files(
         # Rowcount is fine as a lower-bound; ON CONFLICT may not reflect all changes precisely.
         return affected
 
-def fetch_approved_unprocessed_paths(limit: Optional[int] = None) -> List[str]:
+def fetch_approved_unprocessed_paths_map(limit: Optional[int] = None) -> Dict[str, Optional[str]]:
     """
-    Return a list of file_path values from ingest_files where:
+    Return a dict mapping file_path -> date_format from ingest_files where:
       - status ILIKE 'approved' (case-insensitive)
-      - is_processed = FALSE (treats NULL as FALSE too)
+      - is_processed = FALSE (NULL treated as FALSE)
+      - file_path is present
     Ordered by received_at (oldest first), then id.
+    If duplicate file_paths exist, the earliest (by ordering) wins.
     """
     base_sql = """
-        SELECT file_path
+        SELECT file_path, date_format
         FROM ingest_files
         WHERE LOWER(COALESCE(status, '')) = 'approved'
           AND COALESCE(is_processed, FALSE) = FALSE
@@ -644,4 +646,8 @@ def fetch_approved_unprocessed_paths(limit: Optional[int] = None) -> List[str]:
             cur.execute(sql)
         rows = cur.fetchall()
 
-    return [r[0] for r in rows]
+    out: Dict[str, Optional[str]] = {}
+    for file_path, date_format in rows:
+        if file_path not in out:  # keep the earliest one if duplicates
+            out[file_path] = date_format
+    return out

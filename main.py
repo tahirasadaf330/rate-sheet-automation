@@ -20,16 +20,15 @@ from email_verification import verify_fetch_emails
 import os
 import json
 from pathlib import Path
-from preprocess_data import load_clean_rates
-from typing import Iterable, Tuple, Optional, Dict, Any, List
+from preprocess_data import load_clean_rates, _raw_from_excel_pandas
+from typing import Iterable, Tuple, Optional, Dict, Any, List, Mapping
 from datetime import datetime, timezone
 from database import insert_rate_upload, bulk_insert_rate_upload_details, push_failed_emails_json_to_db, fetch_approved_unprocessed_paths, insert_rejected_email_row, insert_or_update_ingest_file
 import pandas as pd
-from typing import Any
 from datetime import datetime
 import re
-from preprocess_data import _raw_from_excel_pandas
- 
+
+
 FAILED_EMAILS_PATH = Path(__file__).with_name("failed_emails.json")
 
 
@@ -200,21 +199,24 @@ def ingest_files_for_manual_date(attachments_root: str | Path = "attachments") -
     print(f"[INGEST] summary: scanned={scanned}, inserted={inserted}, skipped={skipped}")
     return (scanned, inserted, skipped)
 
-def mark_date_verification_ingestion(valid_paths: Iterable[str]) -> Tuple[int, int, int]:
+def mark_date_verification_ingestion(path_to_format: Mapping[str, Optional[str]]) -> Tuple[int, int, int]:
     """
     For each file path like:
       /.../attachments/<dir>/<filename.xlsx>
     find its parent directory <dir>, open <dir>/metadata.json, and set:
       date_verification_ingestion_status = True
+      date_format_identified = <value from path_to_format[file_path]>
 
-    - Does NOT modify the input list.
-    - Deduplicates parent directories.
+    - Input: dict mapping file_path -> date_format
+    - Does NOT modify the input.
+    - Deduplicates parent directories (first occurrence wins).
     - Returns (dirs_seen, updated, missing_meta).
     """
-    # Collect unique parent directories
+    # Collect unique parent directories in order, tracking chosen date_format per dir
     parents = []
     seen = set()
-    for p in valid_paths:
+    dir_fmt = {}
+    for p, fmt in path_to_format.items():
         try:
             d = Path(p).parent.resolve()
         except Exception:
@@ -222,6 +224,7 @@ def mark_date_verification_ingestion(valid_paths: Iterable[str]) -> Tuple[int, i
         if d not in seen:
             seen.add(d)
             parents.append(d)
+            dir_fmt[d] = fmt  # remember the first date_format seen for this dir
 
     dirs_seen = len(parents)
     updated = 0
@@ -242,11 +245,13 @@ def mark_date_verification_ingestion(valid_paths: Iterable[str]) -> Tuple[int, i
             missing_meta += 1
             continue
 
+        # Keep original behavior: if already true, do not modify file
         if meta.get("date_verification_ingestion_status") is True:
             print(f"[INGEST] Already marked true: {d}")
             continue
 
         meta["date_verification_ingestion_status"] = True
+        meta["date_format_identified"] = dir_fmt.get(d)
 
         # Atomic-ish write
         tmp = meta_path.with_suffix(meta_path.suffix + ".tmp")
@@ -255,7 +260,7 @@ def mark_date_verification_ingestion(valid_paths: Iterable[str]) -> Tuple[int, i
         os.replace(tmp, meta_path)
 
         updated += 1
-        print(f"[INGEST] Marked date_verification_ingestion_status=true → {meta_path}")
+        print(f"[INGEST] Marked date_verification_ingestion_status=true (date_format_identified={dir_fmt.get(d)!r}) → {meta_path}")
 
     print(f"[INGEST] summary: dirs_seen={dirs_seen}, updated={updated}, missing_meta={missing_meta}")
     return dirs_seen, updated, missing_meta
@@ -405,6 +410,11 @@ def iter_preprocessed_dirs_(attachments_root: Path):
             print('  ✖ Failed to load metadata')
             continue
 
+        # NEW: require manual date verification approval
+        if not bool(data.get("date_verification_ingestion_status")):
+            print(f"[SKIP] Awaiting date verification approval: {child}")
+            continue
+
         if bool(data.get("jerasoft_preprocessed")) is True:
             results = data.get("preprocessed_results", {})
             if not results or any(v is False for v in results.values()):
@@ -464,7 +474,20 @@ def clean_preprocessed_folders(attachments_dir: str | Path):
                 in_path = str(file_path)
                 out_path = str(file_path)   # same path -> overwrite in place
                 print(f"  - Cleaning: {file_path}")
-                cleaned_df = load_clean_rates(in_path, out_path, 0)
+                
+                date_fmt = (metadata.get("date_format_identified") or "").strip() or None
+                fname = file_path.name.lower()
+
+                # If this is a JeraSoft output, force ISO dates
+                if "jerasoft_comparison_all" in fname or "jerasoft_comparison" in fname:
+                    date_fmt_to_use = "YYYY-MM-DD"
+                else:
+                    date_fmt_to_use = date_fmt
+
+                print(f"DEBUG: Date format for this file: {date_fmt_to_use!r}")
+
+                cleaned_df = load_clean_rates(in_path, out_path, 0, date_format_email=date_fmt_to_use)
+
                 files_done += 1
                 print(f"    ✔ cleaned -> {file_path}")
                 # Update metadata with successful cleaning result
@@ -522,6 +545,11 @@ def iter_preprocessed_dirs(attachments_root: Path) -> Iterable[Path]:
             with meta_path.open("r", encoding="utf-8") as f:
                 data = json.load(f)
         except Exception:
+            continue
+
+        # NEW: require manual date verification approval
+        if not bool(data.get("date_verification_ingestion_status")):
+            print(f"[SKIP] Awaiting date verification approval: {child}")
             continue
 
         if data.get("jerasoft_preprocessed") is True:
