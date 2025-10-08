@@ -651,3 +651,25 @@ def fetch_approved_unprocessed_paths_map(limit: Optional[int] = None) -> Dict[st
         if file_path not in out:  # keep the earliest one if duplicates
             out[file_path] = date_format
     return out
+
+def mark_ingest_processed(file_paths: Iterable[str], processed: bool = True) -> int:
+    """
+    Bulk-mark ingest_files rows as processed/unprocessed by exact file_path match.
+
+    Returns number of rows updated.
+    """
+    paths = [p for p in set(file_paths) if p]
+    if not paths:
+        return 0
+
+    sql = """
+        UPDATE ingest_files
+           SET is_processed = %s,
+               updated_at = NOW()
+         WHERE file_path = ANY(%s)
+    """
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(sql, (processed, paths))
+        updated = cur.rowcount
+        conn.commit()
+    return updated

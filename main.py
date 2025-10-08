@@ -23,7 +23,7 @@ from pathlib import Path
 from preprocess_data import load_clean_rates, _raw_from_excel_pandas
 from typing import Iterable, Tuple, Optional, Dict, Any, List, Mapping
 from datetime import datetime, timezone
-from database import insert_rate_upload, bulk_insert_rate_upload_details, push_failed_emails_json_to_db, fetch_approved_unprocessed_paths, insert_rejected_email_row, insert_or_update_ingest_file
+from database import insert_rate_upload, bulk_insert_rate_upload_details, push_failed_emails_json_to_db, fetch_approved_unprocessed_paths_map, insert_rejected_email_row, insert_or_update_ingest_file, mark_ingest_processed
 import pandas as pd
 from datetime import datetime
 import re
@@ -1267,21 +1267,84 @@ def push_all_ok_results(attachments_root: str | Path) -> Tuple[int, int, int]:
     print(f"Rows inserted:     {rows_total}")
     return folders_done, files_done, rows_total
 
+def finalize_processed_flags(paths_map: Dict[str, Optional[str]]) -> Tuple[int, int, int]:
+    """
+    Given {file_path: date_format or None}, look up each file's parent folder.
+    If that folder's metadata.json has results_pushed with all values strictly True,
+    mark that specific file_path row as is_processed = TRUE in the DB.
+
+    Returns: (dirs_scanned, eligible_dirs, rows_marked)
+    """
+    # Deduplicate by directory, but keep a mapping back to at least one file_path per dir
+    dir_to_any_fp: Dict[Path, str] = {}
+    for fp in paths_map.keys():
+        try:
+            d = Path(fp).parent.resolve()
+        except Exception:
+            continue
+        # keep the first seen file_path for this dir
+        dir_to_any_fp.setdefault(d, fp)
+
+    dirs_scanned = 0
+    eligible_dirs = 0
+    to_mark: list[str] = []
+
+    for d, fp_for_dir in dir_to_any_fp.items():
+        dirs_scanned += 1
+        meta_path = d / "metadata.json"
+        if not meta_path.exists():
+            print(f"[INGEST][SKIP] No metadata.json in {d}")
+            continue
+
+        try:
+            with meta_path.open("r", encoding="utf-8") as f:
+                meta = json.load(f)
+        except Exception as e:
+            print(f"[INGEST][WARN] Failed to read {meta_path}: {e}")
+            continue
+
+        rp = meta.get("results_pushed")
+        if not isinstance(rp, dict) or not rp:
+            print(f"[INGEST][SKIP] No results_pushed or empty in {meta_path}")
+            continue
+
+        # All entries must be strictly boolean True
+        all_true = all(v is True for v in rp.values())
+        if not all_true:
+            print(f"[INGEST][WAIT] Not all results pushed in {meta_path} -> {rp}")
+            continue
+
+        # This directory is eligible -> mark its chosen file_path
+        eligible_dirs += 1
+        to_mark.append(fp_for_dir)
+
+    rows_marked = 0
+    if to_mark:
+        try:
+            rows_marked = mark_ingest_processed(to_mark, processed=True)
+            print(f"[INGEST] Marked is_processed=TRUE for {rows_marked} rows")
+        except Exception as e:
+            print(f"[INGEST][ERR] Failed to update is_processed flags: {e}")
+
+    print(f"[INGEST] finalize_processed_flags summary: dirs_scanned={dirs_scanned}, "
+          f"eligible_dirs={eligible_dirs}, rows_marked={rows_marked}")
+    return dirs_scanned, eligible_dirs, rows_marked
+
+#______________________________________________________________________________
+
 
 if __name__ == "__main__":
     # scrap all the valid emails
     verify_fetch_emails(after, before, unread_only)
 
-
     #________________________________________________
     # run the ingestion pass before any further processing
     ingest_files_for_manual_date("attachments")
 
-    valid_paths = fetch_approved_unprocessed_paths()
+    valid_paths = fetch_approved_unprocessed_paths_map()
 
     mark_date_verification_ingestion(valid_paths)
     #________________________________________________
-
 
 
     # fetch jerasoft rates
@@ -1301,5 +1364,9 @@ if __name__ == "__main__":
     push_failed_emails_json_to_db("failed_emails.json")  
 
 
+    #___________________________________________________________
+    # Setting the is_processed status of the processed files to true in the db
+    # Try to mark is_processed for those whose folders have fully-pushed results
+    finalize_processed_flags(valid_paths)
 
 
