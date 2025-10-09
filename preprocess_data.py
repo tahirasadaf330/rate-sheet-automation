@@ -776,8 +776,6 @@ def normalise_date_any(val, date_format: str | None = None) -> pd.Timestamp:
     return pd.NaT
 
 
-
-
 def clean_billing_increment(val) -> str:
     """
     Normalize vendor increments with the rule:
@@ -815,17 +813,6 @@ def clean_billing_increment(val) -> str:
 
     # len(nums) == 1
     return f"{nums[0]}/{nums[0]}"
-
-
-# def normalize_dates(df, column_name):
-#     """
-#     Normalize the date column to YYYY-MM-DD format and remove time parts based on the date_format_email.
-#     """
-#     # Remove any time-related part after the date using regex
-#     print(f"\n\n\nBefore extracting date part:\n{df[column_name]}\n\n\n")
-#     df[column_name] = df[column_name].astype(str).str.extract(r'(\d{1,4}[-./]\d{1,2}[-./]\d{1,4})')[0]
-#     print(f"\n\n\nAfter extracting date part:\n{df[column_name]}\n\n\n")
-#     return df
 
 
 def normalize_dates(df, column_name, date_format_email):
@@ -963,10 +950,10 @@ def load_clean_rates(path: str, output_path: str, sheet=None, date_format_email:
 
 # ──────────────────────────── quick test ─────────────────────────────────────
 if __name__ == '__main__':
-    PATH = r'C:\Users\User\OneDrive - Hayo Telecom, Inc\Documents\Work\Rate Sheet Automation\rate-sheet-automation\attachments\tahir.ali_at_kingrevolution.com_20251002_132705\rates-TERM-RATE_IMPORT_AUTOMATION_TESTING_PREFIX1234-2025-10-02_124952_jerasoft_comparison.xlsx'
-    OUT_PATH = r'C:\Users\User\OneDrive - Hayo Telecom, Inc\Documents\Work\Rate Sheet Automation\rate-sheet-automation\attachments\tahir.ali_at_kingrevolution.com_20251002_132705\rates-TERM-RATE_IMPORT_AUTOMATION_TESTING_PREFIX1234-2025-10-02_124952_jerasoft_comparison_cleaned.xlsx'
+    PATH = r'C:\Users\User\OneDrive - Hayo Telecom, Inc\Documents\Work\Rate Sheet Automation\rate-sheet-automation\attachments\Book1.xlsx'
+    OUT_PATH = r'C:\Users\User\OneDrive - Hayo Telecom, Inc\Documents\Work\Rate Sheet Automation\rate-sheet-automation\attachments\Book1_cleaned.xlsx'
     FILE_PATH = PATH
     OUTPUT_FILE_PATH = OUT_PATH 
-    cleaned = load_clean_rates(FILE_PATH, OUTPUT_FILE_PATH, 0, date_format_email='YYYY-MM-DD')
+    cleaned = load_clean_rates(FILE_PATH, OUTPUT_FILE_PATH, 0, date_format_email='DD-MM-YYYY')
    
     print('✅ Cleaned and saved.')
