@@ -55,11 +55,11 @@ def read_table(path: str, sheet: Optional[str] = None) -> pd.DataFrame:
     df[COL_RATE] = pd.to_numeric(df[COL_RATE], errors="coerce")
     df["_edate_raw"] = df[COL_EDATE]
 
-    # df[COL_EDATE] = (
-    # pd.to_datetime(df[COL_EDATE], errors="coerce", utc=True)
-    #   .dt.tz_convert(None)     # drop timezone
+    df[COL_EDATE] = (
+    pd.to_datetime(df[COL_EDATE], errors="coerce", utc=True)
+      .dt.tz_convert(None)     # drop timezone
     #   .dt.normalize()          # <-- force to 00:00:00
-    # )
+    )
 
     df[COL_BI] = df[COL_BI].astype(str).str.strip()
 
