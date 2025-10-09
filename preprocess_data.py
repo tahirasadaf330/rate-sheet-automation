@@ -721,39 +721,10 @@ def _normalize_excel_writer_path(path: str) -> tuple[str, dict]:
     dbg(f"[writer] forcing .xlsx for unknown ext {ext or '(none)'}")
     return new_path, {'engine': 'openpyxl'}
 
-# def normalise_date_any(val) -> pd.Timestamp:
-#     """Return pandas.Timestamp (UTC-naive) or NaT if invalid."""
-#     if val is None or (isinstance(val, float) and np.isnan(val)) or str(val).strip() == '':
-#         return pd.NaT
-
-#     s = str(val).strip()
-
-#     # Excel serial (integer days since 1899-12-30)
-#     if re.fullmatch(r'\d{1,6}', s):
-#         try:
-#             serial = int(s)
-#             if serial > 0:
-#                 return EXCEL_EPOCH + pd.Timedelta(days=serial)
-#         except Exception:
-#             return pd.NaT
-
-#     # Remove timezone suffixes like +0000 or Z
-#     s = re.sub(r'\s*\+\d{4}$', '', s).rstrip('Zz')
-#     s = s.replace('/', '-').replace('.', '-')
-
-#     for dayfirst in (True, False):
-#         try:
-#             dt = dparse.parse(s, dayfirst=dayfirst, fuzzy=True,
-#                               default=datetime(1900, 1, 1))
-#             return pd.Timestamp(dt.date())
-#         except Exception:
-#             continue
-
-#     return pd.NaT
-
 def normalise_date_any(val, date_format: str | None = None) -> pd.Timestamp:
     """Return pandas.Timestamp (UTC-naive) or NaT if invalid.
        If date_format is provided, parse strictly to that format; else auto-guess."""
+    print(f"\n\n\n Date Format received: {date_format},, {val} \n\n\n")
     if val is None or (isinstance(val, float) and np.isnan(val)) or str(val).strip() == '':
         return pd.NaT
 
@@ -788,6 +759,7 @@ def normalise_date_any(val, date_format: str | None = None) -> pd.Timestamp:
                       .replace('dd',   '%d'))
         try:
             dt = datetime.strptime(s_norm, fmt_py)
+            print(f"\n\n\n Debug: Date parsed: {dt} \n\n\n")
             return pd.Timestamp(dt.date())
         except Exception:
             return pd.NaT
@@ -802,6 +774,9 @@ def normalise_date_any(val, date_format: str | None = None) -> pd.Timestamp:
             continue
 
     return pd.NaT
+
+
+
 
 def clean_billing_increment(val) -> str:
     """
@@ -841,6 +816,59 @@ def clean_billing_increment(val) -> str:
     # len(nums) == 1
     return f"{nums[0]}/{nums[0]}"
 
+
+# def normalize_dates(df, column_name):
+#     """
+#     Normalize the date column to YYYY-MM-DD format and remove time parts based on the date_format_email.
+#     """
+#     # Remove any time-related part after the date using regex
+#     print(f"\n\n\nBefore extracting date part:\n{df[column_name]}\n\n\n")
+#     df[column_name] = df[column_name].astype(str).str.extract(r'(\d{1,4}[-./]\d{1,2}[-./]\d{1,4})')[0]
+#     print(f"\n\n\nAfter extracting date part:\n{df[column_name]}\n\n\n")
+#     return df
+
+
+def normalize_dates(df, column_name, date_format_email):
+    """
+    Normalize the date column to the required format and strip the time based on the date_format_email.
+    """
+
+    # Remove any time-related part after the date using regex
+    print(f"\n\n\nBefore extracting date part:\n{df[column_name]}\n\n\n")
+
+    # Replace . or / with -
+    df[column_name] = df[column_name].str.replace(r'[./]', '-', regex=True)
+
+    print(f"\n\n\nAfter replacing . or / with -:\n{df[column_name]}\n\n\n")
+
+    df[column_name] = df[column_name].astype(str).str.extract(r'(\d{1,4}[-./]\d{1,2}[-./]\d{1,4})')[0]
+   
+
+    print(f"\n\n\nAfter extracting date part:\n{df[column_name]}\n\n\n")
+
+    if date_format_email == 'MM-DD-YYYY':
+        # Handle MM-DD-YYYY format, convert to YYYY-MM-DD
+        df[column_name] = pd.to_datetime(df[column_name], format='%m-%d-%Y', errors='coerce')
+        df[column_name] = df[column_name].dt.strftime('%Y-%m-%d')
+
+    elif date_format_email == 'DD-MM-YYYY':
+        # Handle DD-MM-YYYY format, convert to YYYY-MM-DD
+        df[column_name] = pd.to_datetime(df[column_name], format='%d-%m-%Y', errors='coerce')
+        df[column_name] = df[column_name].dt.strftime('%Y-%m-%d')
+
+    elif date_format_email == 'YYYY-MM-DD':
+        # Handle YYYY-MM-DD format, no conversion needed
+        df[column_name] = pd.to_datetime(df[column_name], format='%Y-%m-%d', errors='coerce')
+        df[column_name] = df[column_name].dt.strftime('%Y-%m-%d')
+
+    else:
+        # If the date format doesn't match any of the three options, raise an exception
+        raise ValueError(f"Unsupported date format: {date_format_email}")
+
+    return df
+
+
+
 def load_clean_rates(path: str, output_path: str, sheet=None, date_format_email: str | None = None) -> pd.DataFrame:
     """
     Robust loader:
@@ -855,6 +883,9 @@ def load_clean_rates(path: str, output_path: str, sheet=None, date_format_email:
 
     # 1) raw grid
     raw = _read_raw_matrix(path, sheet=sheet)
+
+    print(f"\n\n\nInitial raw data read from file:\n{raw}\n\n\n")
+    # return raw
 
     print('\n\nDEBUG: Calling the detect header row function from load_clean_rates\n\n')
     # 2) detect header row in the raw grid
@@ -902,8 +933,17 @@ def load_clean_rates(path: str, output_path: str, sheet=None, date_format_email:
     # Effective Date: robust parse (your helper returns Timestamp or NaT)
     # df['Effective Date'] = df['Effective Date'].apply(normalise_date_any)
 
-    df['Effective Date'] = df['Effective Date'].apply(lambda v: normalise_date_any(v, date_format=date_format_email))
 
+    print(f"\n\n\nBefore normalizing Effective Date normalize_dates:\n{df['Effective Date']}\n\n\n")
+
+    # If date_format_email is provided, normalize the dates
+    if date_format_email:
+        df = normalize_dates(df, 'Effective Date', date_format_email= date_format_email)
+
+
+    # df['Effective Date'] = df['Effective Date'].apply(lambda v: normalise_date_any(v, date_format=date_format_email))
+
+    print(f"\n\n\nAfter normalizing Effective Date:\n{df['Effective Date']}\n\n\n")
 
     df = expand_dst_code_rows(df)
 
@@ -923,10 +963,10 @@ def load_clean_rates(path: str, output_path: str, sheet=None, date_format_email:
 
 # ──────────────────────────── quick test ─────────────────────────────────────
 if __name__ == '__main__':
-    PATH = r'C:\Users\User\OneDrive - Hayo Telecom, Inc\Documents\Work\Rate Sheet Automation\rate-sheet-automation\attachments\rates_at_cimatelecom.com_20251001_003531\20250930224635_51097_24942_jerasoft_comparison.xlsx'
-    OUT_PATH = r'C:\Users\User\OneDrive - Hayo Telecom, Inc\Documents\Work\Rate Sheet Automation\rate-sheet-automation\attachments\rates_at_cimatelecom.com_20251001_003531\20250930224635_51097_24942_jerasoft_cleaned.xlsx'
+    PATH = r'C:\Users\User\OneDrive - Hayo Telecom, Inc\Documents\Work\Rate Sheet Automation\rate-sheet-automation\attachments\tahir.ali_at_kingrevolution.com_20251002_132705\rates-TERM-RATE_IMPORT_AUTOMATION_TESTING_PREFIX1234-2025-10-02_124952_jerasoft_comparison.xlsx'
+    OUT_PATH = r'C:\Users\User\OneDrive - Hayo Telecom, Inc\Documents\Work\Rate Sheet Automation\rate-sheet-automation\attachments\tahir.ali_at_kingrevolution.com_20251002_132705\rates-TERM-RATE_IMPORT_AUTOMATION_TESTING_PREFIX1234-2025-10-02_124952_jerasoft_comparison_cleaned.xlsx'
     FILE_PATH = PATH
     OUTPUT_FILE_PATH = OUT_PATH 
-    cleaned = load_clean_rates(FILE_PATH, OUTPUT_FILE_PATH, 0)
+    cleaned = load_clean_rates(FILE_PATH, OUTPUT_FILE_PATH, 0, date_format_email='YYYY-MM-DD')
    
     print('✅ Cleaned and saved.')

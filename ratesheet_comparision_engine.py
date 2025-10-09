@@ -54,11 +54,13 @@ def read_table(path: str, sheet: Optional[str] = None) -> pd.DataFrame:
     df["_rate_raw"] = df[COL_RATE]
     df[COL_RATE] = pd.to_numeric(df[COL_RATE], errors="coerce")
     df["_edate_raw"] = df[COL_EDATE]
-    df[COL_EDATE] = (
-    pd.to_datetime(df[COL_EDATE], errors="coerce", utc=True)
-      .dt.tz_convert(None)     # drop timezone
-      .dt.normalize()          # <-- force to 00:00:00
-    )
+
+    # df[COL_EDATE] = (
+    # pd.to_datetime(df[COL_EDATE], errors="coerce", utc=True)
+    #   .dt.tz_convert(None)     # drop timezone
+    #   .dt.normalize()          # <-- force to 00:00:00
+    # )
+
     df[COL_BI] = df[COL_BI].astype(str).str.strip()
 
     df.dropna(how='all', inplace=True)
@@ -206,31 +208,6 @@ def compare(left: pd.DataFrame, right: pd.DataFrame, as_of_date: Optional[str], 
         invalid = bool(left_reasons or right_reasons)
         if invalid:
             print(f"   Validation issues: {left_reasons + right_reasons}")
-
-#################################
-# Changed to tackle the status rejected issue
-################################
-        # if bi_changed[i]:
-        #     print(" → Billing Increment changed")
-        #     change_type = "Billing Increments Changes"
-        #     eff_note = effective_note(n_date, as_of, notice_days)
-
-        #     # Accept only with proper notice; reject backdated or short notice
-        #     if n_date < as_of:
-        #         status = "Rejected"
-        #         notes.append("immediate effective date")
-        #     elif eff_note == "proper 7-day notice":
-        #         status = "Accepted"
-        #         notes.append("proper 7-day notice")
-        #     else:
-        #         status = "Rejected"
-        #         notes.append(eff_note)
-
-        #     notes.append("billing increment changed")
-
-        #     # If rate ALSO changed (beyond tolerance), mention it in notes
-        #     if can_compare_rate[i] and not np.isclose(n_rate, o_rate, atol=rate_tol):
-        #         notes.append("rate changed")
 
         if bi_changed[i]:
             print(" → Billing Increment changed")
