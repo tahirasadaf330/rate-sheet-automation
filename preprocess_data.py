@@ -223,37 +223,12 @@ def _raw_from_ws(ws) -> pd.DataFrame:
     return raw.astype("string")
 
 
-
-# def _raw_from_excel_pandas(path: str, sheet) -> pd.DataFrame:
-#     """
-#     Read a sheet using pandas.read_excel so we bypass stale <dimension> metadata.
-#     Returns a raw grid (no headers assigned), dropping all-empty rows/columns.
-#     """
-#     # Try calamine first (handles xlsx/xls fast), then fall back to openpyxl.
-#     engines = ("calamine", "openpyxl")
-#     last_exc = None
-#     for eng in engines:
-#         try:
-#             df = pd.read_excel(path)
-#             # Normalize to your raw-grid shape, like _raw_from_ws
-#             df = pd.DataFrame(df)
-#             df.dropna(how="all", inplace=True)
-#             df.dropna(axis=1, how="all", inplace=True)
-#             df.reset_index(drop=True, inplace=True)
-#             return df.astype("string")
-#         except Exception as e:
-#             last_exc = e
-#             continue
-#     # If both engines failed, bubble up the last exception
-#     raise last_exc if last_exc else RuntimeError("read_excel failed without an exception?")
-
 # ── PATCH 1: make the pandas reader actually try multiple engines & the target sheet ──
 def _raw_from_excel_pandas(path: str, sheet) -> pd.DataFrame:
     """
     Read a sheet using pandas.read_excel with multiple engines.
     Returns a raw grid (no headers assigned), dropping all-empty rows/columns.
     """
-    import pandas as pd
     engines = ("calamine", "openpyxl")  # try calamine first; fall back to openpyxl
     last_exc = None
     for eng in engines:
@@ -281,67 +256,6 @@ def _raw_from_excel_pandas(path: str, sheet) -> pd.DataFrame:
             last_exc = e
             continue
     raise last_exc if last_exc else RuntimeError("read_excel failed with both calamine and openpyxl")
-
-
-
-# def _read_raw_matrix(path: str, sheet=0) -> pd.DataFrame:
-#     ext = os.path.splitext(path)[1].lower()
-#     if ext in ('.xlsx', '.xlsm', '.xls'):
-#         # Optional: route legacy .xls straight to pandas, since openpyxl can't read BIFF .xls
-#         if ext == '.xls':
-#             try:
-#                 print("DEBUG: Trying the read excel pandas method")
-#                 raw_pd = _raw_from_excel_pandas(path, sheet if sheet is not None else 0)
-#                 print("DEBUG: Gotcha using the read excel pandas method")
-#                 return raw_pd
-#             except Exception:
-#                 # fall through to the openpyxl loop anyway, in case the file is misnamed
-#                 pass
-#         print("DEBUG: Trying the workbook method")
-#         wb = load_workbook(path, data_only=True, read_only=True)
-
-#         # try requested sheet first, then all others
-#         try_order = []
-#         if isinstance(sheet, int) and 0 <= sheet < len(wb.worksheets):
-#             try_order.append(sheet)
-#         elif isinstance(sheet, str):
-#             try_order += [i for i, ws in enumerate(wb.worksheets) if ws.title == sheet]
-
-#         try_order += [i for i in range(len(wb.worksheets)) if i not in try_order]
-
-#         for i in try_order:
-#             raw_stream = _raw_from_ws(wb.worksheets[i])
-
-#             # --- NEW: fallback trigger happens BEFORE header detection ---
-#             chosen = raw_stream
-#             if raw_stream.shape[0] < ROW_FALLBACK_THRESHOLD:
-#                 try:
-#                     raw_pd = _raw_from_excel_pandas(path, i)  # same sheet index
-#                     if raw_pd.shape[0] > raw_stream.shape[0]:
-#                         dbg(f"[excel-fallback] streaming rows={raw_stream.shape[0]} < {ROW_FALLBACK_THRESHOLD}; "
-#                             f"pandas rows={raw_pd.shape[0]} -> using pandas for sheet #{i}")
-#                         chosen = raw_pd
-#                     else:
-#                         dbg(f"[excel-fallback] streaming rows={raw_stream.shape[0]} < {ROW_FALLBACK_THRESHOLD}; "
-#                             f"pandas rows={raw_pd.shape[0]} not larger -> keeping streaming for sheet #{i}")
-#                 except Exception as e:
-#                     dbg(f"[excel-fallback] pandas read failed on sheet #{i}: {e}")
-#             # -------------------------------------------------------------
-
-#             try:
-#                 print('\n\nDEBUG: Calling the detect header row function from read_raw_matrix\n\n')
-#                 _ = detect_header_row(chosen)  # will raise if not found
-#                 wb.close()
-#                 print("\n\nDEBUG: Gotcha using the read excel openpyxl method")
-#                 return chosen  # this sheet has the headers; use it
-#             except ValueError:
-#                 print("\n\nDEBUG: Failed the detect_header_row check")
-#                 continue
-
-#         raise ValueError("No sheet contains all required headers.")
-#     else:
-#         return pd.read_csv(path, header=None, dtype=str)
-
 
 # ── PATCH 2: strengthen _read_raw_matrix to try pandas when there are 0 worksheets
 #             and as a final fallback when header detection fails on all sheets. ──
@@ -807,15 +721,16 @@ def _normalize_excel_writer_path(path: str) -> tuple[str, dict]:
     dbg(f"[writer] forcing .xlsx for unknown ext {ext or '(none)'}")
     return new_path, {'engine': 'openpyxl'}
 
-
-def normalise_date_any(val) -> pd.Timestamp:
-    """Return pandas.Timestamp (UTC-naive) or NaT if invalid."""
+def normalise_date_any(val, date_format: str | None = None) -> pd.Timestamp:
+    """Return pandas.Timestamp (UTC-naive) or NaT if invalid.
+       If date_format is provided, parse strictly to that format; else auto-guess."""
+    print(f"\n\n\n Date Format received: {date_format},, {val} \n\n\n")
     if val is None or (isinstance(val, float) and np.isnan(val)) or str(val).strip() == '':
         return pd.NaT
 
     s = str(val).strip()
 
-    # Excel serial (integer days since 1899-12-30)
+    # Excel serial (integer days since 1899-12-30) – allowed in both modes
     if re.fullmatch(r'\d{1,6}', s):
         try:
             serial = int(s)
@@ -824,19 +739,42 @@ def normalise_date_any(val) -> pd.Timestamp:
         except Exception:
             return pd.NaT
 
-    # Remove timezone suffixes like +0000 or Z
-    s = re.sub(r'\s*\+\d{4}$', '', s).rstrip('Zz')
-    s = s.replace('/', '-').replace('.', '-')
+    # Strip timezone suffixes and unify separators
+    s = re.sub(r'\s*\+\d{4}$', '', s).rstrip('Zz').strip()
 
+    if date_format:
+        # STRICT mode: parse exactly as given format
+        s_norm = s.replace('/', '-').replace('.', '-')
+        fmt_raw = date_format.strip().lower().replace('/', '-').replace('.', '-')
+
+        # accept either python strptime tokens or simple tokens like yyyy-mm-dd, mm-dd-yy, etc.
+        if '%' in fmt_raw:
+            fmt_py = fmt_raw
+        else:
+            # replace longer tokens first to avoid overlaps
+            fmt_py = (fmt_raw
+                      .replace('yyyy', '%Y')
+                      .replace('yy',   '%y')
+                      .replace('mm',   '%m')
+                      .replace('dd',   '%d'))
+        try:
+            dt = datetime.strptime(s_norm, fmt_py)
+            print(f"\n\n\n Debug: Date parsed: {dt} \n\n\n")
+            return pd.Timestamp(dt.date())
+        except Exception:
+            return pd.NaT
+
+    # AUTO mode (original behavior)
+    s_auto = s.replace('/', '-').replace('.', '-')
     for dayfirst in (True, False):
         try:
-            dt = dparse.parse(s, dayfirst=dayfirst, fuzzy=True,
-                              default=datetime(1900, 1, 1))
+            dt = dparse.parse(s_auto, dayfirst=dayfirst, fuzzy=True, default=datetime(1900, 1, 1))
             return pd.Timestamp(dt.date())
         except Exception:
             continue
 
     return pd.NaT
+
 
 def clean_billing_increment(val) -> str:
     """
@@ -876,7 +814,49 @@ def clean_billing_increment(val) -> str:
     # len(nums) == 1
     return f"{nums[0]}/{nums[0]}"
 
-def load_clean_rates(path: str, output_path: str, sheet=None) -> pd.DataFrame:
+
+def normalize_dates(df, column_name, date_format_email):
+    """
+    Normalize the date column to the required format and strip the time based on the date_format_email.
+    """
+
+    # Remove any time-related part after the date using regex
+    print(f"\n\n\nBefore extracting date part:\n{df[column_name]}\n\n\n")
+
+    # Replace . or / with -
+    df[column_name] = df[column_name].str.replace(r'[./]', '-', regex=True)
+
+    print(f"\n\n\nAfter replacing . or / with -:\n{df[column_name]}\n\n\n")
+
+    df[column_name] = df[column_name].astype(str).str.extract(r'(\d{1,4}[-./]\d{1,2}[-./]\d{1,4})')[0]
+   
+
+    print(f"\n\n\nAfter extracting date part:\n{df[column_name]}\n\n\n")
+
+    if date_format_email == 'MM-DD-YYYY':
+        # Handle MM-DD-YYYY format, convert to YYYY-MM-DD
+        df[column_name] = pd.to_datetime(df[column_name], format='%m-%d-%Y', errors='coerce')
+        df[column_name] = df[column_name].dt.strftime('%Y-%m-%d')
+
+    elif date_format_email == 'DD-MM-YYYY':
+        # Handle DD-MM-YYYY format, convert to YYYY-MM-DD
+        df[column_name] = pd.to_datetime(df[column_name], format='%d-%m-%Y', errors='coerce')
+        df[column_name] = df[column_name].dt.strftime('%Y-%m-%d')
+
+    elif date_format_email == 'YYYY-MM-DD':
+        # Handle YYYY-MM-DD format, no conversion needed
+        df[column_name] = pd.to_datetime(df[column_name], format='%Y-%m-%d', errors='coerce')
+        df[column_name] = df[column_name].dt.strftime('%Y-%m-%d')
+
+    else:
+        # If the date format doesn't match any of the three options, raise an exception
+        raise ValueError(f"Unsupported date format: {date_format_email}")
+
+    return df
+
+
+
+def load_clean_rates(path: str, output_path: str, sheet=None, date_format_email: str | None = None) -> pd.DataFrame:
     """
     Robust loader:
       1) Read raw grid (openpyxl for Excel; pandas for CSV/TXT)
@@ -890,6 +870,9 @@ def load_clean_rates(path: str, output_path: str, sheet=None) -> pd.DataFrame:
 
     # 1) raw grid
     raw = _read_raw_matrix(path, sheet=sheet)
+
+    print(f"\n\n\nInitial raw data read from file:\n{raw}\n\n\n")
+    # return raw
 
     print('\n\nDEBUG: Calling the detect header row function from load_clean_rates\n\n')
     # 2) detect header row in the raw grid
@@ -909,17 +892,6 @@ def load_clean_rates(path: str, output_path: str, sheet=None) -> pd.DataFrame:
     df = _canonicalize_headers(df)
     df = _synthesize_billing_increment(df)
     df = trim_after_notes_and_strip_blank_above(df)
-
-    # keep only canonical required columns
-
-    # if "jerasoft" in str(path).lower():
-    #     # make sure "Dst Code" is included exactly once
-    #     if "Dst Code Name" not in REQUIRED_COLS:
-    #         REQUIRED_COLS.append("Dst Code Name")
-    #     df = df[REQUIRED_COLS].copy()
-
-    # else:
-    #     df = df[REQUIRED_COLS].copy()
 
     is_js = "jerasoft" in str(path).lower()
     required_cols = list(REQUIRED_COLS)
@@ -946,7 +918,19 @@ def load_clean_rates(path: str, output_path: str, sheet=None) -> pd.DataFrame:
     df['Billing Increment'] = df['Billing Increment'].astype(str).str.strip().apply(clean_billing_increment)
 
     # Effective Date: robust parse (your helper returns Timestamp or NaT)
-    df['Effective Date'] = df['Effective Date'].apply(normalise_date_any)
+    # df['Effective Date'] = df['Effective Date'].apply(normalise_date_any)
+
+
+    print(f"\n\n\nBefore normalizing Effective Date normalize_dates:\n{df['Effective Date']}\n\n\n")
+
+    # If date_format_email is provided, normalize the dates
+    if date_format_email:
+        df = normalize_dates(df, 'Effective Date', date_format_email= date_format_email)
+
+
+    # df['Effective Date'] = df['Effective Date'].apply(lambda v: normalise_date_any(v, date_format=date_format_email))
+
+    print(f"\n\n\nAfter normalizing Effective Date:\n{df['Effective Date']}\n\n\n")
 
     df = expand_dst_code_rows(df)
 
@@ -959,12 +943,6 @@ def load_clean_rates(path: str, output_path: str, sheet=None) -> pd.DataFrame:
     )
 
 
-    # if "jerasoft" in str(path).lower():
-    #     # make sure "Dst Code" is included exactly once, remove "Dst Code Name" if it's in REQUIRED_COLS
-    #     if "Dst Code Name" in REQUIRED_COLS:
-    #         REQUIRED_COLS.remove("Dst Code Name")
-
-
     # finally, write the cleaned sheet
     out_path, writer_kwargs = _normalize_excel_writer_path(output_path)
     df.to_excel(out_path, index=False, **writer_kwargs)
@@ -972,10 +950,10 @@ def load_clean_rates(path: str, output_path: str, sheet=None) -> pd.DataFrame:
 
 # ──────────────────────────── quick test ─────────────────────────────────────
 if __name__ == '__main__':
-    PATH = r'C:\Users\User\OneDrive - Hayo Telecom, Inc\Documents\Work\Rate Sheet Automation\rate-sheet-automation\attachments\rates_at_cimatelecom.com_20251001_003531\20250930224635_51097_24942_jerasoft_comparison.xlsx'
-    OUT_PATH = r'C:\Users\User\OneDrive - Hayo Telecom, Inc\Documents\Work\Rate Sheet Automation\rate-sheet-automation\attachments\rates_at_cimatelecom.com_20251001_003531\20250930224635_51097_24942_jerasoft_cleaned.xlsx'
+    PATH = r'C:\Users\User\OneDrive - Hayo Telecom, Inc\Documents\Work\Rate Sheet Automation\rate-sheet-automation\attachments\Book1.xlsx'
+    OUT_PATH = r'C:\Users\User\OneDrive - Hayo Telecom, Inc\Documents\Work\Rate Sheet Automation\rate-sheet-automation\attachments\Book1_cleaned.xlsx'
     FILE_PATH = PATH
     OUTPUT_FILE_PATH = OUT_PATH 
-    cleaned = load_clean_rates(FILE_PATH, OUTPUT_FILE_PATH, 0)
+    cleaned = load_clean_rates(FILE_PATH, OUTPUT_FILE_PATH, 0, date_format_email='DD-MM-YYYY')
    
     print('✅ Cleaned and saved.')

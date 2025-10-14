@@ -20,28 +20,250 @@ from email_verification import verify_fetch_emails
 import os
 import json
 from pathlib import Path
-from preprocess_data import load_clean_rates
-from typing import Iterable, Tuple, Optional, Dict, Any, List
+from preprocess_data import load_clean_rates, _raw_from_excel_pandas
+from typing import Iterable, Tuple, Optional, Dict, Any, List, Mapping
 from datetime import datetime, timezone
-from database import insert_rate_upload, bulk_insert_rate_upload_details, push_failed_emails_json_to_db
+from database import insert_rate_upload, bulk_insert_rate_upload_details, push_failed_emails_json_to_db, fetch_approved_unprocessed_paths_map, insert_rejected_email_row, insert_or_update_ingest_file, mark_ingest_processed
 import pandas as pd
-from typing import Any
-from database import insert_rejected_email_row  
-# from valid_emails import refresh_verified_senders
+from datetime import datetime
+import re
 
 
- 
 FAILED_EMAILS_PATH = Path(__file__).with_name("failed_emails.json")
 
-# refresh_verified_senders()
 
 #_____________ Email Verification Script_____________
 
-after = "2025-09-29"              # only include emails on/after this date (YYYY-MM-DD) or None     "2025-08-29"
+# after = "2025-09-29"              # only include emails on/after this date (YYYY-MM-DD) or None     "2025-08-29"
+after = datetime.now().strftime("%Y-%m-%d")
 before = None       # only include emails on/before this date (YYYY-MM-DD) or None
 unread_only = False    
 ATTEMPTS = 2
-verify_fetch_emails(after, before, unread_only)
+
+#________________ Manual Date Verification _____________________
+
+MAX_PREVIEW_ROWS = 200
+EXCEL_EXTS = ('.xlsx', '.xlsm', '.xls')
+
+def _parse_iso_utc_dt(s: Optional[str]) -> Optional[datetime]:
+    if not s or not isinstance(s, str):
+        return None
+    try:
+        return datetime.fromisoformat(s.replace("Z", "+00:00"))
+    except Exception:
+        return None
+
+def _df_preview_records(df: pd.DataFrame, limit: int = MAX_PREVIEW_ROWS) -> list[dict]:
+    """Rename columns to col1..colN and return first N rows as list of dicts (strings, blanks for NaN)."""
+    if df is None or df.empty:
+        return []
+    df = df.head(limit).reset_index(drop=True)
+    # ensure all values are strings; keep blanks for NaN
+    try:
+        df = df.astype("string")
+    except Exception:
+        df = df.astype(str)
+    ncols = int(df.shape[1])
+    df.columns = [f"col{i+1}" for i in range(ncols)]
+    # fillna("") for string dtype keeps <NA> out of JSON
+    try:
+        df = df.fillna("")
+    except Exception:
+        pass
+    return df.to_dict(orient="records")
+
+def _first_attachment_path(meta: dict) -> Optional[Path]:
+    """Return absolute Path to the first attachment (join with directory if needed)."""
+    attachments = meta.get("attachments") or []
+    if not isinstance(attachments, list) or len(attachments) == 0:
+        return None
+
+    first_item = str(attachments[0]).strip()
+    if not first_item:
+        return None
+
+    p = Path(first_item)
+    if p.is_absolute():
+        return p
+
+    # directory contains the folder path (Linux server)
+    base_dir = str(meta.get("directory") or "").strip()
+    if not base_dir:
+        return None
+    return Path(base_dir) / first_item
+
+def ingest_files_for_manual_date(attachments_root: str | Path = "attachments") -> tuple[int, int, int]:
+    """
+    Walk attachments/* folders, and for each folder whose metadata.json has
+    no 'date_verification_ingestion' (or it's False):
+      - pick the first attachment
+      - read first 200 rows (csv or excel via _raw_from_excel_pandas)
+      - build preview_cache (list[dict] -> col1..colN)
+      - insert into ingest_files (email_address, subject, received_at, processed_at, file_path, preview_cache, error_message)
+      - set metadata['date_verification_ingestion'] = True
+
+    Returns: (scanned_folders, inserted_rows, skipped_folders)
+    """
+    root = Path(attachments_root).expanduser().resolve()
+    if not root.exists():
+        print(f"[INGEST] attachments root not found: {root}")
+        return (0, 0, 0)
+
+    scanned = 0
+    inserted = 0
+    skipped = 0
+
+    for folder in sorted(root.iterdir()):
+        if not folder.is_dir():
+            continue
+        scanned += 1
+
+        meta_path = folder / "metadata.json"
+        if not meta_path.exists():
+            print(f"[INGEST][SKIP] {folder.name}: no metadata.json")
+            skipped += 1
+            continue
+
+        try:
+            with meta_path.open("r", encoding="utf-8") as f:
+                meta = json.load(f) or {}
+        except Exception as e:
+            print(f"[INGEST][SKIP] {folder.name}: failed reading metadata.json: {e}")
+            skipped += 1
+            continue
+
+        # Skip if already ingested for manual date verification
+        if bool(meta.get("date_verification_ingestion")):
+            # already processed this folder for manual date step
+            continue
+
+        # Step 2: find first attachment
+        fpath = _first_attachment_path(meta)
+        if not fpath:
+            print(f"[INGEST][SKIP] {folder.name}: metadata.attachments missing/empty")
+            skipped += 1
+            continue
+
+        # Build the preview_cache
+        preview_cache: list[dict] = []
+        error_message: Optional[str] = None
+
+        try:
+            ext = fpath.suffix.lower()
+            if ext == ".csv":
+                # treat as raw grid; include header row as data by using header=None
+                df = pd.read_csv(str(fpath), header=None, nrows=MAX_PREVIEW_ROWS, dtype=str, on_bad_lines="skip")
+                preview_cache = _df_preview_records(df, MAX_PREVIEW_ROWS)
+            elif ext in EXCEL_EXTS:
+                df = _raw_from_excel_pandas(str(fpath), sheet=0)  # your robust multi-engine reader
+                preview_cache = _df_preview_records(df, MAX_PREVIEW_ROWS)
+            else:
+                # optional: best-effort text read as CSV
+                try:
+                    df = pd.read_csv(str(fpath), header=None, nrows=MAX_PREVIEW_ROWS, dtype=str, engine="python")
+                    preview_cache = _df_preview_records(df, MAX_PREVIEW_ROWS)
+                except Exception as e2:
+                    raise RuntimeError(f"Unsupported file type {ext} and CSV fallback failed: {e2}") from e2
+        except Exception as e:
+            error_message = f"preview build failed: {e}"
+            preview_cache = []  # still ingest a row with the error
+
+        # Collect DB fields
+        email_address = (meta.get("sender") or "").strip() or None
+        subject = (meta.get("subject") or "").strip() or None
+        received_at = _parse_iso_utc_dt(meta.get("receivedDateTime_raw"))
+        processed_at = _parse_iso_utc_dt(meta.get("processed_at_utc"))
+        file_path = str(fpath)
+
+        try:
+            _id = insert_or_update_ingest_file(
+                email_address=email_address,
+                subject=subject,
+                received_at=received_at,
+                processed_at=processed_at,
+                file_path=file_path,
+                preview_cache=preview_cache,
+                error_message=error_message,
+            )
+            inserted += 1
+            print(f"[INGEST][OK] id={_id} -> {folder.name} :: {fpath.name}")
+
+            # Mark folder as done for this step
+            meta["date_verification_ingestion"] = True
+            with meta_path.open("w", encoding="utf-8") as f:
+                json.dump(meta, f, ensure_ascii=False, indent=2)
+        except Exception as db_e:
+            print(f"[INGEST][ERR] DB insert failed for {folder.name}: {db_e}")
+            # do NOT set the flag so we can retry later
+
+    print(f"[INGEST] summary: scanned={scanned}, inserted={inserted}, skipped={skipped}")
+    return (scanned, inserted, skipped)
+
+def mark_date_verification_ingestion(path_to_format: Mapping[str, Optional[str]]) -> Tuple[int, int, int]:
+    """
+    For each file path like:
+      /.../attachments/<dir>/<filename.xlsx>
+    find its parent directory <dir>, open <dir>/metadata.json, and set:
+      date_verification_ingestion_status = True
+      date_format_identified = <value from path_to_format[file_path]>
+
+    - Input: dict mapping file_path -> date_format
+    - Does NOT modify the input.
+    - Deduplicates parent directories (first occurrence wins).
+    - Returns (dirs_seen, updated, missing_meta).
+    """
+    # Collect unique parent directories in order, tracking chosen date_format per dir
+    parents = []
+    seen = set()
+    dir_fmt = {}
+    for p, fmt in path_to_format.items():
+        try:
+            d = Path(p).parent.resolve()
+        except Exception:
+            continue
+        if d not in seen:
+            seen.add(d)
+            parents.append(d)
+            dir_fmt[d] = fmt  # remember the first date_format seen for this dir
+
+    dirs_seen = len(parents)
+    updated = 0
+    missing_meta = 0
+
+    for d in parents:
+        meta_path = d / "metadata.json"
+        if not meta_path.exists():
+            print(f"[INGEST][SKIP] No metadata.json in {d}")
+            missing_meta += 1
+            continue
+
+        try:
+            with meta_path.open("r", encoding="utf-8") as f:
+                meta = json.load(f)
+        except Exception as e:
+            print(f"[INGEST][WARN] Failed to read {meta_path}: {e}")
+            missing_meta += 1
+            continue
+
+        # Keep original behavior: if already true, do not modify file
+        if meta.get("date_verification_ingestion_status") is True:
+            print(f"[INGEST] Already marked true: {d}")
+            continue
+
+        meta["date_verification_ingestion_status"] = True
+        meta["date_format_identified"] = dir_fmt.get(d)
+
+        # Atomic-ish write
+        tmp = meta_path.with_suffix(meta_path.suffix + ".tmp")
+        with tmp.open("w", encoding="utf-8") as f:
+            json.dump(meta, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, meta_path)
+
+        updated += 1
+        print(f"[INGEST] Marked date_verification_ingestion_status=true (date_format_identified={dir_fmt.get(d)!r}) → {meta_path}")
+
+    print(f"[INGEST] summary: dirs_seen={dirs_seen}, updated={updated}, missing_meta={missing_meta}")
+    return dirs_seen, updated, missing_meta
 
 #_______________ Jerasoft Script _____________
 
@@ -71,6 +293,11 @@ def process_all_directories(attachments_base="attachments"):
         # Skip if already jerasoft_preprocessed
         if meta.get("jerasoft_preprocessed") is True:
             print(f"[SKIP] Already jerasoft_preprocessed: {subdir}")
+            continue
+
+        # NEW: require manual date verification approval
+        if not bool(meta.get("date_verification_ingestion_status")):
+            print(f"[SKIP] Awaiting date verification approval: {subdir}")
             continue
 
         # Extract subject
@@ -162,8 +389,6 @@ def process_all_directories(attachments_base="attachments"):
         if info is None:
             print(f"[SKIP] {company} not exported; moving on.")
 
-process_all_directories()
-
 #_______________ Preprocess Script _____________
 
 ALLOWED_EXTS = {".xlsx", ".xls", ".csv"}
@@ -183,6 +408,11 @@ def iter_preprocessed_dirs_(attachments_root: Path):
                 data = json.load(f)
         except Exception:
             print('  ✖ Failed to load metadata')
+            continue
+
+        # NEW: require manual date verification approval
+        if not bool(data.get("date_verification_ingestion_status")):
+            print(f"[SKIP] Awaiting date verification approval: {child}")
             continue
 
         if bool(data.get("jerasoft_preprocessed")) is True:
@@ -244,7 +474,20 @@ def clean_preprocessed_folders(attachments_dir: str | Path):
                 in_path = str(file_path)
                 out_path = str(file_path)   # same path -> overwrite in place
                 print(f"  - Cleaning: {file_path}")
-                cleaned_df = load_clean_rates(in_path, out_path, 0)
+                
+                date_fmt = (metadata.get("date_format_identified") or "").strip() or None
+                fname = file_path.name.lower()
+
+                # If this is a JeraSoft output, force ISO dates
+                if "jerasoft_comparison_all" in fname or "jerasoft_comparison" in fname:
+                    date_fmt_to_use = "YYYY-MM-DD"
+                else:
+                    date_fmt_to_use = date_fmt
+
+                print(f"DEBUG: Date format for this file: {date_fmt_to_use!r}")
+
+                cleaned_df = load_clean_rates(in_path, out_path, 0, date_format_email=date_fmt_to_use)
+
                 files_done += 1
                 print(f"    ✔ cleaned -> {file_path}")
                 # Update metadata with successful cleaning result
@@ -282,8 +525,6 @@ def clean_preprocessed_folders(attachments_dir: str | Path):
     print(f"Files cleaned:     {files_done}")
     return folders_done, files_done
 
-clean_preprocessed_folders("attachments")
-
 #________________ Ratesheet Comparision Script _____________
 
 ALLOWED_EXTS = {".xlsx", ".xls", ".csv"}
@@ -304,6 +545,11 @@ def iter_preprocessed_dirs(attachments_root: Path) -> Iterable[Path]:
             with meta_path.open("r", encoding="utf-8") as f:
                 data = json.load(f)
         except Exception:
+            continue
+
+        # NEW: require manual date verification approval
+        if not bool(data.get("date_verification_ingestion_status")):
+            print(f"[SKIP] Awaiting date verification approval: {child}")
             continue
 
         if data.get("jerasoft_preprocessed") is True:
@@ -496,8 +742,11 @@ def compare_preprocessed_folders(
                 meta["comparision_result"] = {"result": "ok", **comp_result}
             else:
                 meta["comparision_result"] = {"result": "no comparisons succeeded", **comp_result}
+
+            meta["processed_at_utc"] = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
         else:
             meta["comparision_result"] = {"result": "no eligible vendor files"}
+            meta["processed_at_utc"] = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
 
         try:
             _write_metadata(folder, meta)
@@ -508,8 +757,6 @@ def compare_preprocessed_folders(
     print(f"Folders processed:     {folders_done}")
     print(f"Comparison files made: {writes}")
     return folders_done, writes
-
-compare_preprocessed_folders("attachments", notice_days=7, rate_tol=0.0001)  #check the difference upto 4 decimal places.
 
 ##############################################
 
@@ -811,7 +1058,7 @@ def df_to_detail_dicts(df: pd.DataFrame) -> List[Dict[str, Any]]:
 
     has_old_bi   = "Old Billing Increment" in df.columns
     has_new_bi   = "New Billing Increment" in df.columns
-    has_code_name = "Code Name" in df.columns
+    has_code_name = "Dst Code Name" in df.columns
 
     for _, r in df.iterrows():
         eff = r["Effective Date"]
@@ -835,19 +1082,21 @@ def df_to_detail_dicts(df: pd.DataFrame) -> List[Dict[str, Any]]:
             v = r.get("New Billing Increment")
             item["new_billing_increment"] = None if pd.isna(v) else str(v).strip()
         if has_code_name:
-            v = r.get("Code Name")
+            v = r.get("Dst Code Name")
             item["code_name"] = None if pd.isna(v) else str(v).strip()
 
         details.append(item)
 
     return details
 
+BOUND = r"(?:(?<=^)|(?<=,))\s*{label}\s*(?:(?=,)|(?=$))"  # comma-boundary regex
+
+def _has_ct(df: pd.DataFrame, label: str) -> pd.Series:
+    pat = re.compile(BOUND.format(label=re.escape(label)), flags=re.IGNORECASE)
+    ct = df.get("Change Type", pd.Series([], dtype="object")).astype(str)
+    return ct.str.contains(pat, na=False)
+
 def compute_upload_stats(dfs: List[pd.DataFrame]) -> Dict[str, int]:
-    """
-    Aggregate counts for the rate_uploads summary columns across all given DataFrames.
-    Assumes each df has at least the EXPECTED_COLS. Optional billing increment columns
-    will be used if present.
-    """
     if not dfs:
         return {
             "total_rows": 0,
@@ -858,147 +1107,42 @@ def compute_upload_stats(dfs: List[pd.DataFrame]) -> Dict[str, int]:
 
     df = pd.concat(dfs, ignore_index=True)
 
-    s = df.get("Status", pd.Series([], dtype="object")).astype(str).str.strip().str.lower()
-    ct = df.get("Change Type", pd.Series([], dtype="object")).astype(str).str.strip().str.lower()
+    # Membership by Change Type (supports multi-label like "Billing ... Changes,Backdated Increase")
+    is_new      = _has_ct(df, "New")
+    is_closed   = _has_ct(df, "Closed")
+    is_unchanged= _has_ct(df, "Unchanged")
 
-    def count_status(name: str) -> int:
-        return int((s == name).sum())
+    is_back_inc = _has_ct(df, "Backdated Increase")
+    is_back_dec = _has_ct(df, "Backdated Decrease")
 
-    total_rows = int(len(df))
-    new = count_status("new")
-    increase = count_status("increase")
-    decrease = count_status("decrease")
-    unchanged = count_status("unchanged")
-    closed = count_status("closed")
+    # Normal inc/dec exclude backdated so totals don’t double-count
+    is_inc = _has_ct(df, "Increase") & ~is_back_inc
+    is_dec = _has_ct(df, "Decrease") & ~is_back_dec
 
-    back_inc = int((((ct.str.contains("backdated", na=False)) & (ct.str.contains("increase", na=False))) |
-                (s == "backdated increase")).sum())
-    back_dec = int((((ct.str.contains("backdated", na=False)) & (ct.str.contains("decrease", na=False))) |
-                (s == "backdated decrease")).sum())
-
-    # billing increment changes if columns exist
+    # Billing increment changes: prefer ground truth from columns if present;
+    # otherwise fall back to label membership.
     bic = 0
-    if "Old Billing Increment" in df.columns or "New Billing Increment" in df.columns:
-        obi = df.get("Old Billing Increment")
-        nbi = df.get("New Billing Increment")
-        if obi is not None and nbi is not None:
-            bic = int((obi.astype(str).fillna("") != nbi.astype(str).fillna("")).sum())
+    obi = df.get("Old Billing Increment")
+    nbi = df.get("New Billing Increment")
+    if obi is not None and nbi is not None:
+        # Compare with nulls treated as equal and types normalized
+        o = pd.Series(obi, dtype="string").fillna("")
+        n = pd.Series(nbi, dtype="string").fillna("")
+        bic = int((o != n).sum())
+    else:
+        bic = int(_has_ct(df, "Billing Increments Changes").sum())
 
     return {
-        "total_rows": total_rows,
-        "new": new,
-        "increase": increase,
-        "decrease": decrease,
-        "unchanged": unchanged,
-        "closed": closed,
-        "backdated_increase": back_inc,
-        "backdated_decrease": back_dec,
+        "total_rows": int(len(df)),
+        "new":               int(is_new.sum()),
+        "increase":          int(is_inc.sum()),
+        "decrease":          int(is_dec.sum()),
+        "unchanged":         int(is_unchanged.sum()),
+        "closed":            int(is_closed.sum()),
+        "backdated_increase":int(is_back_inc.sum()),
+        "backdated_decrease":int(is_back_dec.sum()),
         "billing_increment_changes": bic,
     }
-
-
-# def push_all_ok_results(attachments_root: str | Path) -> Tuple[int, int, int]:
-#     """
-#     For each folder whose metadata compar(i)son_result.result == 'ok':
-#       - insert into rate_uploads (sender, received_at, meta_data)
-#       - read every file ending with *_comparision_result.{xlsx|xls|csv}
-#       - bulk insert rows into rate_upload_details
-#       - update metadata.json -> results_pushed[filename] = True/False
-#     Returns: (folders_processed, files_processed, rows_inserted_total)
-#     """
-#     root = Path(attachments_root).expanduser().resolve()
-#     if not root.exists():
-#         raise FileNotFoundError(f"Attachments directory not found: {root}")
-
-#     folders_done = 0
-#     files_done = 0
-#     rows_total = 0
-
-#     print("\n=== DB push over OK comparison-result folders ===")
-#     for child in sorted(root.iterdir()):
-#         if not child.is_dir():
-#             continue
-
-#         meta = load_metadata(child)
-#         if not meta or not comparison_result_ok(meta):
-#             continue
-
-#         # Get meta_data
-#         meta_data = meta.get("meta_data")  # Assuming metadata is stored here
-
-#         result_files = find_result_files(child)
-#         if not result_files:
-#             continue
-
-#         # Read all result files up-front for stats aggregation
-#         all_dfs: List[pd.DataFrame] = []
-#         for f in result_files:
-#             try:
-#                 df_tmp = read_comparison_table(f)
-#                 if not df_tmp.empty:
-#                     all_dfs.append(df_tmp)
-#             except Exception as e:
-#                 print(f"    ⚠ failed reading {f.name} for stats aggregation: {e}")
-
-#         stats_totals = compute_upload_stats(all_dfs)
-
-
-#         folders_done += 1
-#         print(f"\n[FOLDER] {child}")
-
-#         sender = str(meta.get("sender") or "").strip()
-#         received_at = parse_received_at(meta)
-
-#         subject = (meta.get("subject") or "").strip() or None
-#         processed_at = _parse_iso_utc_safe(meta.get("processed_at_utc"))
-#         meta_data = meta.get("meta_data") 
-
-#         try:
-#             upload_id = insert_rate_upload(
-#                 sender_email=sender or None,
-#                 subject=subject,
-#                 received_at=received_at,
-#                 processed_at=processed_at,
-#                 totals=stats_totals,
-#             )
-#         except Exception as e:
-#             print(f"  ✖ Failed to create rate_upload row: {e}")
-#             rp = meta.get("results_pushed") or {}
-#             for f in result_files:
-#                 if rp.get(f.name) is True:
-#                     continue
-#                 mark_results_pushed(child, f.name, False)
-#             continue
-
-#         # per-file skip for already-pushed
-#         rp = meta.get("results_pushed") or {}
-#         for f in result_files:
-#             if rp.get(f.name) is True:
-#                 print(f"  - Skipping already pushed: {f.name}")
-#                 continue
-
-#             print(f"  - Processing {f.name}")
-#             try:
-#                 df = read_comparison_table(f)
-#                 if df.empty:
-#                     print("    ⚠ empty comparison file; nothing to push")
-#                     mark_results_pushed(child, f.name, "empty file no results to push to the data base")
-#                     continue
-#                 details = df_to_detail_dicts(df)
-#                 inserted = bulk_insert_rate_upload_details(upload_id, details)
-#                 rows_total += inserted
-#                 files_done += 1
-#                 print(f"    ✔ inserted {inserted} rows")
-#                 mark_results_pushed(child, f.name, True)
-#             except Exception as e:
-#                 print(f"    ✖ failed to insert from {f.name}: {e}")
-#                 mark_results_pushed(child, f.name, False)
-
-#     print("\n=== DB push summary ===")
-#     print(f"Folders processed: {folders_done}")
-#     print(f"Files processed:   {files_done}")
-#     print(f"Rows inserted:     {rows_total}")
-#     return folders_done, files_done, rows_total
 
 def push_all_ok_results(attachments_root: str | Path) -> Tuple[int, int, int]:
     """
@@ -1123,11 +1267,104 @@ def push_all_ok_results(attachments_root: str | Path) -> Tuple[int, int, int]:
     print(f"Rows inserted:     {rows_total}")
     return folders_done, files_done, rows_total
 
+def finalize_processed_flags(paths_map: Dict[str, Optional[str]]) -> Tuple[int, int, int]:
+    """
+    Given {file_path: date_format or None}, look up each file's parent folder.
+    If that folder's metadata.json has results_pushed with all values strictly True,
+    mark that specific file_path row as is_processed = TRUE in the DB.
+
+    Returns: (dirs_scanned, eligible_dirs, rows_marked)
+    """
+    # Deduplicate by directory, but keep a mapping back to at least one file_path per dir
+    dir_to_any_fp: Dict[Path, str] = {}
+    for fp in paths_map.keys():
+        try:
+            d = Path(fp).parent.resolve()
+        except Exception:
+            continue
+        # keep the first seen file_path for this dir
+        dir_to_any_fp.setdefault(d, fp)
+
+    dirs_scanned = 0
+    eligible_dirs = 0
+    to_mark: list[str] = []
+
+    for d, fp_for_dir in dir_to_any_fp.items():
+        dirs_scanned += 1
+        meta_path = d / "metadata.json"
+        if not meta_path.exists():
+            print(f"[INGEST][SKIP] No metadata.json in {d}")
+            continue
+
+        try:
+            with meta_path.open("r", encoding="utf-8") as f:
+                meta = json.load(f)
+        except Exception as e:
+            print(f"[INGEST][WARN] Failed to read {meta_path}: {e}")
+            continue
+
+        rp = meta.get("results_pushed")
+        if not isinstance(rp, dict) or not rp:
+            print(f"[INGEST][SKIP] No results_pushed or empty in {meta_path}")
+            continue
+
+        # All entries must be strictly boolean True
+        all_true = all(v is True for v in rp.values())
+        if not all_true:
+            print(f"[INGEST][WAIT] Not all results pushed in {meta_path} -> {rp}")
+            continue
+
+        # This directory is eligible -> mark its chosen file_path
+        eligible_dirs += 1
+        to_mark.append(fp_for_dir)
+
+    rows_marked = 0
+    if to_mark:
+        try:
+            rows_marked = mark_ingest_processed(to_mark, processed=True)
+            print(f"[INGEST] Marked is_processed=TRUE for {rows_marked} rows")
+        except Exception as e:
+            print(f"[INGEST][ERR] Failed to update is_processed flags: {e}")
+
+    print(f"[INGEST] finalize_processed_flags summary: dirs_scanned={dirs_scanned}, "
+          f"eligible_dirs={eligible_dirs}, rows_marked={rows_marked}")
+    return dirs_scanned, eligible_dirs, rows_marked
+
+#______________________________________________________________________________
 
 
-push_rejections_from_metadata("attachments")
+if __name__ == "__main__":
+    # scrap all the valid emails
+    verify_fetch_emails(after, before, unread_only)
 
-push_all_ok_results(ATTACHMENTS_ROOT)
+    #________________________________________________
+    # run the ingestion pass before any further processing
+    ingest_files_for_manual_date("attachments")
 
-push_failed_emails_json_to_db("failed_emails.json")  
+    valid_paths = fetch_approved_unprocessed_paths_map()
 
+    mark_date_verification_ingestion(valid_paths)
+    #________________________________________________
+
+
+    # fetch jerasoft rates
+    process_all_directories()
+
+    # preprocessing the files
+    clean_preprocessed_folders("attachments")
+
+    # running comparision engine on all the files
+    compare_preprocessed_folders("attachments", notice_days=7, rate_tol=0.0001)  #check the difference upto 4 decimal places.
+
+    # pushing all the relevant details to the data base
+    push_rejections_from_metadata("attachments")
+
+    push_all_ok_results(ATTACHMENTS_ROOT)
+
+    push_failed_emails_json_to_db("failed_emails.json")  
+
+
+    #___________________________________________________________
+    # Setting the is_processed status of the processed files to true in the db
+    # Try to mark is_processed for those whose folders have fully-pushed results
+    finalize_processed_flags(valid_paths)

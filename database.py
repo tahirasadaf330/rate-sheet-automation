@@ -2,12 +2,13 @@ import os
 from dotenv import load_dotenv
 import psycopg2
 from valid_emails import VERIFIED_SENDERS
-from typing import Iterable, Dict, Any, Optional, List, Mapping
+from typing import Iterable, Dict, Any, Optional, List, Mapping, Tuple
 from datetime import datetime
 from decimal import Decimal
 import json
 from psycopg2.extras import execute_values, Json 
 from pathlib import Path
+from typing import Optional
 
 
 # Load environment variables
@@ -150,8 +151,7 @@ def _atomic_write_json(path: Path, data: Dict[str, Any]) -> None:
         json.dump(data, f, ensure_ascii=False, indent=2)
     os.replace(tmp, path)
 
-from typing import Optional
-from datetime import datetime
+
 
 def insert_rejected_email_row(
     *,
@@ -478,3 +478,198 @@ def fetch_authorized_sender_emails(active_only: bool = True) -> List[str]:
 
     return emails
 
+# ____________ Ingesting file for date format review _________________
+
+
+def insert_or_update_ingest_file(
+    *,
+    email_address: Optional[str],
+    subject: Optional[str],
+    received_at: Optional[datetime],
+    processed_at: Optional[datetime],
+    file_path: str,
+    preview_cache: Optional[Dict[str, Any]] = None,
+    error_message: Optional[str] = None,
+) -> int:
+    """
+    Upsert a single row into ingest_files keyed by unique(file_path).
+
+    Columns written (exactly what you requested):
+      email_address, subject, received_at, processed_at, file_path, preview_cache, error_message
+
+    Leaves these for later flows or defaults: mime_type, status, date_format, is_processed,
+    approved_by, approved_at.
+
+    Returns: the row's id.
+    """
+    if not file_path:
+        raise ValueError("file_path is required")
+
+    sql = """
+        INSERT INTO ingest_files (
+            email_address,
+            subject,
+            received_at,
+            processed_at,
+            file_path,
+            preview_cache,
+            error_message,
+            created_at,
+            updated_at
+        )
+        VALUES (
+            %(email_address)s,
+            %(subject)s,
+            %(received_at)s,
+            %(processed_at)s,
+            %(file_path)s,
+            %(preview_cache)s,
+            %(error_message)s,
+            NOW(),
+            NOW()
+        )
+        ON CONFLICT (file_path) DO UPDATE SET
+            email_address = EXCLUDED.email_address,
+            subject       = EXCLUDED.subject,
+            received_at   = EXCLUDED.received_at,
+            processed_at  = EXCLUDED.processed_at,
+            preview_cache = EXCLUDED.preview_cache,
+            error_message = EXCLUDED.error_message,
+            updated_at    = NOW()
+        RETURNING id;
+    """
+
+    params = {
+        "email_address": email_address,
+        "subject": subject,
+        "received_at": received_at,
+        "processed_at": processed_at,
+        "file_path": file_path,
+        # Json(...) ensures jsonb storage if the column is jsonb
+        "preview_cache": Json(preview_cache) if preview_cache is not None else None,
+        "error_message": error_message,
+    }
+
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(sql, params)
+        new_id = cur.fetchone()[0]
+        conn.commit()
+        return new_id
+
+
+def bulk_upsert_ingest_files(
+    rows: Iterable[Dict[str, Any]],
+    page_size: int = 200,
+) -> int:
+    """
+    Bulk upsert many files. Returns the number of rows affected.
+    Each row may include the same keys as insert_or_update_ingest_file args.
+
+    Requires a unique index on (file_path).
+    """
+    # Normalize and coerce preview_cache to Json for each row
+    prepared: list[Tuple] = []
+    for r in rows:
+        fp = r.get("file_path")
+        if not fp:
+            # skip silent or raise; choose sanity
+            raise ValueError("bulk_upsert_ingest_files: each row must include file_path")
+
+        prepared.append((
+            r.get("email_address"),
+            r.get("subject"),
+            r.get("received_at"),
+            r.get("processed_at"),
+            fp,
+            Json(r.get("preview_cache")) if r.get("preview_cache") is not None else None,
+            r.get("error_message"),
+        ))
+
+    if not prepared:
+        return 0
+
+    sql = """
+        INSERT INTO ingest_files (
+            email_address,
+            subject,
+            received_at,
+            processed_at,
+            file_path,
+            preview_cache,
+            error_message,
+            created_at,
+            updated_at
+        )
+        VALUES %s
+        ON CONFLICT (file_path) DO UPDATE SET
+            email_address = EXCLUDED.email_address,
+            subject       = EXCLUDED.subject,
+            received_at   = EXCLUDED.received_at,
+            processed_at  = EXCLUDED.processed_at,
+            preview_cache = EXCLUDED.preview_cache,
+            error_message = EXCLUDED.error_message,
+            updated_at    = NOW()
+    """
+    tpl = "(%s,%s,%s,%s,%s,%s,%s,NOW(),NOW())"
+
+    with get_conn() as conn, conn.cursor() as cur:
+        execute_values(cur, sql, prepared, template=tpl, page_size=page_size)
+        affected = cur.rowcount  # number of rows the last statement claims it touched
+        conn.commit()
+        # Rowcount is fine as a lower-bound; ON CONFLICT may not reflect all changes precisely.
+        return affected
+
+def fetch_approved_unprocessed_paths_map(limit: Optional[int] = None) -> Dict[str, Optional[str]]:
+    """
+    Return a dict mapping file_path -> date_format from ingest_files where:
+      - status ILIKE 'approved' (case-insensitive)
+      - is_processed = FALSE (NULL treated as FALSE)
+      - file_path is present
+    Ordered by received_at (oldest first), then id.
+    If duplicate file_paths exist, the earliest (by ordering) wins.
+    """
+    base_sql = """
+        SELECT file_path, date_format
+        FROM ingest_files
+        WHERE LOWER(COALESCE(status, '')) = 'approved'
+          AND COALESCE(is_processed, FALSE) = FALSE
+          AND file_path IS NOT NULL
+          AND file_path <> ''
+        ORDER BY received_at NULLS LAST, id ASC
+    """
+    sql = base_sql + (" LIMIT %s" if limit is not None else "")
+
+    with get_conn() as conn, conn.cursor() as cur:
+        if limit is not None:
+            cur.execute(sql, (limit,))
+        else:
+            cur.execute(sql)
+        rows = cur.fetchall()
+
+    out: Dict[str, Optional[str]] = {}
+    for file_path, date_format in rows:
+        if file_path not in out:  # keep the earliest one if duplicates
+            out[file_path] = date_format
+    return out
+
+def mark_ingest_processed(file_paths: Iterable[str], processed: bool = True) -> int:
+    """
+    Bulk-mark ingest_files rows as processed/unprocessed by exact file_path match.
+
+    Returns number of rows updated.
+    """
+    paths = [p for p in set(file_paths) if p]
+    if not paths:
+        return 0
+
+    sql = """
+        UPDATE ingest_files
+           SET is_processed = %s,
+               updated_at = NOW()
+         WHERE file_path = ANY(%s)
+    """
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(sql, (processed, paths))
+        updated = cur.rowcount
+        conn.commit()
+    return updated
